@@ -6,7 +6,8 @@
   "scripts": {
     "build": "pnpm -r build",
     "dev:daemon": "pnpm --filter buddy-daemon dev",
-    "dev:voice": "cd voice && uvicorn main:app --port 31416 --reload"
+    "dev:voice": "cd voice && uvicorn main:app --port 31416 --reload",
+    "test": "pnpm -r test"
   },
   "packageManager": "pnpm@9.0.0",
   "engines": {
