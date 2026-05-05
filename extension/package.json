@@ -125,7 +125,7 @@
     "watch": "tsc -p . -w",
     "typecheck": "tsc -p . --noEmit",
     "pretest": "tsc -p .",
-    "test": "node --test test/*.test.mjs"
+    "test": "node --test"
   },
   "dependencies": {
     "ws": "^8.18.0"
