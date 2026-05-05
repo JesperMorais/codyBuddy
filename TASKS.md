@@ -15,7 +15,7 @@ Source spec: `RESEARCH.md` §5.2 (MVP), §5.3 (post-MVP), §5.4 (cost model).
 
 ## Phase 1 — Mechanically verify MVP DoD (RESEARCH §5.2)
 
-- [ ] **1.1** Refactor `AnthropicClient` so `Session` accepts an interface; add a `FakeAnthropicClient` test fixture returning deterministic `BuddyReply` payloads.
+- [x] **1.1** Refactor `AnthropicClient` so `Session` accepts an interface; add a `FakeAnthropicClient` test fixture returning deterministic `BuddyReply` payloads.
 - [ ] **1.2** Daemon WS integration test: boot the WS server in-process with the fake client, send `{type: "trigger", trigger: "EXPLICIT_ASK", payload: {...}}`, assert a `reply` message arrives with `mode !== "no_op"`.
 - [ ] **1.3** Extend `extension/test/triggers.test.mjs` to cover all four trigger comment suffixes (` AI?`, ` AI!`, ` WHY?`, ` STUCK`) plus negative cases (no trigger, mid-line occurrence).
 - [ ] **1.4** STUCK_LOOP timing test using the existing injectable `clock` arg: verify it does NOT fire under 90s with the same diagnostic, DOES fire after 90s with no edit, and DOES NOT fire if an edit was made within 60s.

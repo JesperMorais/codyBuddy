@@ -1,4 +1,4 @@
-import { AnthropicClient, BuddyReply } from "./anthropic.js";
+import type { AiClient, BuddyReply } from "./anthropic.js";
 import { MemoryStore } from "./memory.js";
 
 interface EventLogEntry {
@@ -21,7 +21,7 @@ export class Session {
   private memory: MemoryStore;
 
   constructor(
-    private client: AnthropicClient,
+    private client: AiClient,
     private prompts: Map<string, string>,
     opts: { maxSpokenPerHour?: number; defaultMode?: string; memory?: MemoryStore } = {}
   ) {

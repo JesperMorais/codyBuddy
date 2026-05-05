@@ -6,7 +6,22 @@ export interface BuddyReply {
   wants_followup: boolean;
 }
 
-export class AnthropicClient {
+/**
+ * Subset of the Anthropic-backed client that Session depends on.
+ * Tests can substitute a fake implementation.
+ */
+export interface AiClient {
+  ask(
+    systemPrompt: string,
+    sessionSummary: string,
+    triggerPayload: object,
+    learnerProfile?: string
+  ): Promise<BuddyReply>;
+  summarize(transcript: string): Promise<string>;
+  distillLearnerProfile(history: string, priorProfile: string): Promise<string>;
+}
+
+export class AnthropicClient implements AiClient {
   private client: Anthropic;
   private model: string;
 
