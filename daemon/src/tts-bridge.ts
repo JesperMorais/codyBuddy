@@ -9,8 +9,12 @@ export interface TtsConfig {
   backend: TtsBackend;
   piperExe?: string;
   piperVoice?: string;
+  /** Endpoint of the Kokoro FastAPI sidecar (voice/main.py). Default: http://127.0.0.1:31416/tts */
+  kokoroUrl?: string;
   volume?: number;
 }
+
+const DEFAULT_KOKORO_URL = "http://127.0.0.1:31416/tts";
 
 export class TtsBridge {
   private busy = false;
@@ -26,7 +30,8 @@ export class TtsBridge {
     if (this.cfg.backend === "none") return "off";
     if (this.cfg.backend === "piper")
       return `piper (vol=${this.volume().toFixed(2)})`;
-    if (this.cfg.backend === "kokoro") return "kokoro (not yet wired — Task 2.1)";
+    if (this.cfg.backend === "kokoro")
+      return `kokoro (${this.cfg.kokoroUrl ?? DEFAULT_KOKORO_URL})`;
     return this.cfg.backend;
   }
 
@@ -70,6 +75,10 @@ export class TtsBridge {
   }
 
   private async speakNow(text: string): Promise<void> {
+    if (this.cfg.backend === "kokoro") {
+      await this.speakViaKokoro(text);
+      return;
+    }
     if (this.cfg.backend !== "piper") return;
     const exe = this.cfg.piperExe;
     const voice = this.cfg.piperVoice;
@@ -101,6 +110,18 @@ export class TtsBridge {
       unlinkSync(wavPath);
     } catch {
       // ignore
+    }
+  }
+
+  private async speakViaKokoro(text: string): Promise<void> {
+    const url = this.cfg.kokoroUrl ?? DEFAULT_KOKORO_URL;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    });
+    if (!res.ok) {
+      throw new Error(`kokoro POST ${url} → HTTP ${res.status}`);
     }
   }
 }

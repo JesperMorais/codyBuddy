@@ -29,6 +29,7 @@ try {
 }
 const piperExe = process.env.BUDDY_PIPER_EXE;
 const piperVoice = process.env.BUDDY_PIPER_VOICE;
+const kokoroUrl = process.env.BUDDY_KOKORO_URL;
 const ttsVolume = Number(process.env.BUDDY_TTS_VOLUME ?? "0.5");
 const whisperExe = process.env.BUDDY_WHISPER_EXE;
 const whisperModel = process.env.BUDDY_WHISPER_MODEL;
@@ -49,6 +50,7 @@ const tts = new TtsBridge({
   backend: ttsBackend,
   piperExe,
   piperVoice,
+  kokoroUrl,
   volume: ttsVolume,
 });
 const stt = new SttBridge({ exe: whisperExe, model: whisperModel });
