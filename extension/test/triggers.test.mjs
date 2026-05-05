@@ -90,10 +90,41 @@ r = engine.evaluateDiagnostics(uri, []);
 check("clean: no errors", "no errors", r.debug);
 
 // Trigger comment recognition
-const ev = engine.evaluateExplicit("char* p = malloc(n); // AI?");
-check("trigger comment AI?", "EXPLICIT_ASK", ev?.trigger ?? "");
-const ev2 = engine.evaluateExplicit("normal line of code");
-check("non-trigger comment", "", ev2 ? ev2.trigger : "");
+
+// Positive cases — all four documented suffixes
+const aiQ = engine.evaluateExplicit("char* p = malloc(n); // AI?");
+check("// AI? trigger fires", "EXPLICIT_ASK", aiQ?.trigger ?? "");
+check("// AI? user_question stripped", "char* p = malloc(n); //", aiQ?.userQuestion ?? "");
+
+const aiBang = engine.evaluateExplicit("foo(bar); // AI!");
+check("// AI! trigger fires", "EXPLICIT_ASK", aiBang?.trigger ?? "");
+
+// Python-style # comment, since the regex only anchors on the suffix
+const why = engine.evaluateExplicit("def add(a, b): # WHY?");
+check("# WHY? trigger fires", "EXPLICIT_ASK", why?.trigger ?? "");
+
+const stuck = engine.evaluateExplicit("for i in range(10): # STUCK");
+check("# STUCK trigger fires", "EXPLICIT_ASK", stuck?.trigger ?? "");
+
+// Trailing whitespace is allowed by the regex (`\s*$`)
+const trailing = engine.evaluateExplicit("foo // AI?   ");
+check("trailing whitespace still fires", "EXPLICIT_ASK", trailing?.trigger ?? "");
+
+// Negative cases
+const plain = engine.evaluateExplicit("normal line of code");
+check("non-trigger line returns null", "null", plain === null ? "null" : plain.trigger);
+
+const midline = engine.evaluateExplicit("// AI? but I keep going");
+check("mid-line AI? does not fire", "null", midline === null ? "null" : midline.trigger);
+
+const midlineWhy = engine.evaluateExplicit("WHY? did this break, see notes");
+check("mid-line WHY? does not fire", "null", midlineWhy === null ? "null" : midlineWhy.trigger);
+
+const lookalike = engine.evaluateExplicit("// FAIL");
+check("non-keyword suffix does not fire", "null", lookalike === null ? "null" : lookalike.trigger);
+
+const empty = engine.evaluateExplicit("");
+check("empty line does not fire", "null", empty === null ? "null" : empty.trigger);
 
 console.log(results.join("\n"));
 console.log(`\n${pass} passed, ${fail} failed`);
