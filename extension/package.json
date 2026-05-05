@@ -122,7 +122,9 @@
   },
   "scripts": {
     "build": "tsc -p .",
-    "watch": "tsc -p . -w"
+    "watch": "tsc -p . -w",
+    "pretest": "tsc -p .",
+    "test": "node --test test/*.test.mjs"
   },
   "dependencies": {
     "ws": "^8.18.0"

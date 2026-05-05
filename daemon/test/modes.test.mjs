@@ -13,8 +13,8 @@ const { Session } = await import("../dist/session.js");
 
 const apiKey = process.env.ANTHROPIC_API_KEY;
 if (!apiKey) {
-  console.error("ANTHROPIC_API_KEY missing");
-  process.exit(1);
+  console.log("SKIP: ANTHROPIC_API_KEY not set");
+  process.exit(0);
 }
 
 const promptsDir = resolve(__dirname, "../prompts");
