@@ -84,6 +84,59 @@ Personality is a tone overlay orthogonal to mode (global, not per-mode). Mode pr
 
 ---
 
+## Phase 10 — Local conversation loop
+
+The daemon becomes the conductor of a continuous voice session: mic → VAD → streaming STT → streaming LLM → streaming TTS → speaker, with barge-in. This phase replaces the trigger-then-respond model for the live audio path. The chat/sidebar path keeps working alongside it.
+
+End-to-end latency target: **<800ms from end-of-speech to start-of-buddy-audio**. Every task that touches the loop must include a latency assertion or document why it can't.
+
+- [ ] **10.1** Add silero-vad to `voice/` sidecar (FastAPI). Long-lived endpoint accepting an audio stream over WebSocket; emits `{type: "speech.start"|"speech.end", ts}` events. Daemon spawns and supervises it. Test: feed a fixture WAV with known speech segments; assert event timestamps within ±100ms.
+- [ ] **10.2** Replace one-shot whisper with **streaming whisper.cpp**. Long-lived subprocess fed by mic chunks; emits partial transcripts ~300ms cadence and a final transcript on `speech.end`. Test: fixture WAV produces a final transcript within 400ms of `speech.end`.
+- [ ] **10.3** Streaming Kokoro TTS in `voice/` sidecar. Sentence-in / audio-out chunked. Daemon plays first sentence while later sentences are still synthesising. Test: synth a 4-sentence input; first audio chunk arrives <150ms after first sentence sent.
+- [ ] **10.4** Hard-mute hotkey: extension command `coding-buddy.hardMute` bound to `Ctrl+Shift+M`. Sends `{type: "hardMute"}`; daemon kills mic input AND any in-flight TTS in <50ms. Visible mic indicator in the sidebar (red when muted, green dot when listening, pulsing when buddy is speaking). Test: dispatch the WS message, assert mic stream closed and TTS subprocess sent SIGINT.
+- [ ] **10.5** **Barge-in handler**. On `speech.start` from VAD: cancel TTS audio output AND truncate any in-flight LLM stream. Buddy stops mid-sentence. Test: with a fake long-running TTS and LLM stream, dispatch a `speech.start` event; assert both terminate within 100ms.
+- [ ] **10.6** `ConversationLoop` state machine in `daemon/src/conversation.ts` replacing `Session.handleTrigger` for the live audio path. States: `IDLE → LISTENING → THINKING → SPEAKING → INTERRUPTED → IDLE`. Editor triggers (anti-pattern, stuck-loop, EXPLICIT_ASK) feed in as *opportunities*: queued and consumed when the loop is `IDLE`. `Session` survives as the chat-path wrapper. Test: drive the state machine through each transition with mocked I/O; assert correct state sequence and no orphaned audio.
+- [ ] **10.7** **Backchannel module**. Pre-recorded clips (`voice/backchannels/{mhm,right,yeah,go-on,hmm}.wav` × 3 takes each, varied prosody). When user has been speaking >3s and the loop is `LISTENING`, daemon plays a random backchannel locally, no LLM call. Cooldown ≥8s between backchannels to avoid spam. Configurable via `BUDDY_BACKCHANNEL=on|off` (default `on`). Test: with a 10s synthetic transcript, assert exactly one backchannel plays and the cooldown is honoured.
+- [ ] **10.8** **Wake word, configurable**. New env `BUDDY_WAKEWORD=off|"hey buddy"|<custom>`. When `off` (default), open-mic always-listening. When set, daemon runs a lightweight on-device wake-word detector (openWakeWord) gating the LLM path; audio still streams to Whisper but transcripts are only forwarded to Anthropic after the wake word has fired (with a 30s active window, then back to gated). Test: with `BUDDY_WAKEWORD="hey buddy"` and a fixture transcript "hello world hey buddy what time is it", assert only "what time is it" reaches the LLM path.
+- [ ] **10.9** Conversation-context payload assembler: every time the loop hits `THINKING`, build a unified payload combining (a) conversation transcript so far, (b) editor context (active file, diagnostics, recent_diff — same redactor as 1.6 runs first), (c) most recent editor trigger if any. Sent to the LLM as a single message. Test: assemble a payload from a fixture turn; assert redactor ran and editor context is present.
+
+## Phase 11 — Anthropic streaming + tiered routing
+
+Streams Sonnet/Haiku replies sentence-by-sentence into Kokoro. Two-tier router keeps fast turns cheap.
+
+- [ ] **11.1** `AnthropicClient.askStream(systemBlocks, payload)`: returns an async iterator of text deltas. Replaces `ask` for the conversation loop; the chat path keeps using `ask` for now.
+- [ ] **11.2** Sentence-buffer adapter: consume deltas, emit on sentence boundaries (`.`, `?`, `!`, double newline). Hand each sentence to the Kokoro stream from 10.3. Test: feed a fixture stream of deltas; assert sentences are emitted as soon as their terminator arrives, not at end-of-stream.
+- [ ] **11.3** Add `daemon/prompts/conversational/{tutor,reviewer,architect,explainer}.md`. Plain-text replies (no JSON), 1-2 sentences default, conversational tone, "you are speaking aloud — don't say file paths, line numbers, or symbols longer than one identifier" rule. Existing JSON-mode prompts stay for the chat path. Test: snapshot the assembled system blocks for `conversational/tutor + drill_sergeant`.
+- [ ] **11.4** **Two-tier router** (folds in old Phase 4): Haiku-first for conversational turns; escalate to Sonnet when (a) trigger ∈ {EXPLICIT_ASK, BAD_PATH, MISCONCEPTION}, (b) editor context changed since last turn, (c) transcript token count >threshold, or (d) Haiku itself flagged `escalate: true`. Test: with a stub Haiku returning `escalate: false`, Sonnet is never invoked. With each escalation condition, Sonnet is invoked exactly once.
+- [ ] **11.5** Telemetry per turn: log Haiku tier, Sonnet tier (if reached), input/output/cache tokens, USD estimate, end-to-end latency, wake-word state, personality, mode. To `~/.claude-buddy/telemetry.jsonl`. Test: one full turn appends one line with all fields populated.
+
+## Phase 12 — Voice acting (Kokoro + XTTS-v2 from day one)
+
+Personality stops being just-a-prompt and becomes voice + prosody + script. Both Kokoro and XTTS-v2 ship together — XTTS for the heavyweight character voices, Kokoro for the lightweight everyday ones.
+
+- [ ] **12.1** Add a `personality.json` next to each `daemon/prompts/personalities/*.md`: `{voice_engine: "kokoro"|"xtts", kokoro_voice?: string, xtts_ref?: string, rate: number, energy: number, pause_factor: number}`. Test: each shipped personality has a valid config; loader rejects unknown engines.
+- [ ] **12.2** Map shipped personalities to Kokoro voices: `nice → af_bella`, `dry → am_adam`, `passive_aggressive → af_sarah` (or whichever fits). Test: `setPersonality("dry")` results in TTS calls using the configured Kokoro voice.
+- [ ] **12.3** **XTTS-v2 sidecar** (`voice/xtts.py`, FastAPI). Long-lived process; loads coqui XTTS-v2; accepts `{text, ref_clip, language}` and streams 24kHz PCM. Document GPU expectation in setup notes (CPU fallback works but is ~3× slower). Add to `voice/requirements.txt` and `setup.ps1`. Test: spawn xtts.py, hit `/health`, assert 200; smoke-test synth with a fixture ref clip.
+- [ ] **12.4** Ship reference clips: `voice/refs/{drill_sergeant,pirate,shakespearean,rude}.wav` (5-7s each, public-domain or self-recorded). Map these personalities to `voice_engine: "xtts"` in their `personality.json`. Test: `setPersonality("drill_sergeant")` routes synth requests to XTTS with the correct ref clip.
+- [ ] **12.5** Prosody application: pass `rate`, `energy`, `pause_factor` from `personality.json` through to Kokoro/XTTS params at synth time. Test: same input text under `drill_sergeant` vs `nice` produces audio with measurably different duration.
+- [ ] **12.6** TTS engine selector wired into `tts-bridge.ts`: `BUDDY_TTS_BACKEND` becomes `auto` (let personality decide), with explicit overrides `kokoro`, `xtts`, `piper`, `none` still honoured. Test: `auto` + drill_sergeant uses XTTS; `auto` + nice uses Kokoro; explicit `kokoro` overrides all.
+
+## Phase 13 — Cost discipline
+
+Always-on voice is unviable without aggressive quieting and budget caps.
+
+- [ ] **13.1** Auto-quiet detector: 5 min of no `speech.end` events AND no editor edits → drop the loop into `QUIET` (Haiku-tier polling only, mic still open but transcripts dropped unless wake word matches; if wake word is `off`, Haiku still gates by transcript length >N). Resume on first speech-end or first edit. Test: simulate 6 minutes of silence; assert no Sonnet calls fired and the loop transitioned to `QUIET`.
+- [ ] **13.2** Per-day USD cap: `BUDDY_DAILY_USD=5.00` (default). Tracked from telemetry (11.5). When hit, the loop downgrades to chat-only (TTS off, voice loop suspended) until midnight local. Sidebar shows the cap state. Test: with a low cap and stubbed token costs, assert downgrade after the threshold.
+- [ ] **13.3** Live $/hr counter in the sidebar pill. Rolling 10-min window from telemetry. Test: feed synthetic telemetry; assert the displayed rate matches.
+
+## Phase 14 — Conversational sidebar polish
+
+- [ ] **14.1** Live transcript view in the sidebar: shows your speech (gray) and the buddy's replies (white) as they happen. Stays scrolled to bottom. Backchannels are not shown.
+- [ ] **14.2** "Buddy is thinking…" / "Buddy is speaking…" / "I'm listening…" status pill replacing the current daemon-up indicator.
+- [ ] **14.3** Voice-detected feedback: short utterances "good buddy" / "shut up buddy" / "useful" / "wrong" are recognised by a tiny phrase-match layer (no LLM) and logged as votes (replaces old Phase 7.3). Test: feed each phrase as a transcript; assert the corresponding vote is appended.
+
+---
+
 ## Working agreement
 
 - **One task per PR.** Don't bundle.
