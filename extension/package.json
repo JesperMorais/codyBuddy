@@ -95,6 +95,11 @@
           "default": 31415,
           "description": "Port the buddy daemon listens on (loopback only)."
         },
+        "codingBuddy.autoSpawnDaemon": {
+          "type": "boolean",
+          "default": true,
+          "description": "When true, the extension launches the buddy daemon as a child process on activation. If a daemon is already listening on the configured port, auto-spawn is skipped."
+        },
         "codingBuddy.idleSeconds": {
           "type": "number",
           "default": 300,
