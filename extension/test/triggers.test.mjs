@@ -89,11 +89,32 @@ check("t=330s after fresh edit, hold on noEdit", "noEditMs=0s<=60", r.debug);
 r = engine.evaluateDiagnostics(uri, []);
 check("clean: no errors", "no errors", r.debug);
 
-// Trigger comment recognition
+// Trigger comment recognition — all four suffixes
 const ev = engine.evaluateExplicit("char* p = malloc(n); // AI?");
-check("trigger comment AI?", "EXPLICIT_ASK", ev?.trigger ?? "");
+check("trigger suffix  AI?",  "EXPLICIT_ASK", ev?.trigger ?? "");
+
+const evAIBang = engine.evaluateExplicit("int x = getVal(); // AI!");
+check("trigger suffix  AI!",  "EXPLICIT_ASK", evAIBang?.trigger ?? "");
+
+const evWHY = engine.evaluateExplicit("return result * 2; // WHY?");
+check("trigger suffix  WHY?", "EXPLICIT_ASK", evWHY?.trigger ?? "");
+
+const evSTUCK = engine.evaluateExplicit("while (queue.length) { // STUCK");
+check("trigger suffix  STUCK","EXPLICIT_ASK", evSTUCK?.trigger ?? "");
+
+// Negative: no trigger keyword anywhere
 const ev2 = engine.evaluateExplicit("normal line of code");
-check("non-trigger comment", "", ev2 ? ev2.trigger : "");
+check("no trigger keyword", "null", ev2 === null ? "null" : "not-null");
+
+// Negative: trigger keyword appears mid-line (not at line end)
+const evMidAI = engine.evaluateExplicit("if (x === 0) { /* AI? */ doSomething(); }");
+check("AI? mid-line does not trigger", "null", evMidAI === null ? "null" : "not-null");
+
+const evMidWHY = engine.evaluateExplicit("// WHY? I chose this approach, let me explain.");
+check("WHY? mid-line does not trigger", "null", evMidWHY === null ? "null" : "not-null");
+
+const evMidSTUCK = engine.evaluateExplicit("// STUCK between two words here");
+check("STUCK mid-line does not trigger", "null", evMidSTUCK === null ? "null" : "not-null");
 
 console.log(results.join("\n"));
 console.log(`\n${pass} passed, ${fail} failed`);
