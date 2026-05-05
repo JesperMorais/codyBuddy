@@ -3,10 +3,12 @@ import { DaemonBridge } from "./bridge";
 import { TriggerEngine, TriggerEvent } from "./triggers";
 import { isDeniedFile, scrubSecrets, makeMiniDiff } from "./redactor";
 import { BuddySidebarProvider } from "./ui/sidebar";
+import { findDaemonScript, probeDaemonPort, spawnDaemon, SpawnedDaemon } from "./daemon-spawn";
 
 let muted = false;
 let muteTimer: NodeJS.Timeout | undefined;
 const fileSnapshots = new Map<string, string>();
+let spawnedDaemon: SpawnedDaemon | undefined;
 
 export function activate(ctx: vscode.ExtensionContext): void {
   const cfg = vscode.workspace.getConfiguration("codingBuddy");
@@ -15,9 +17,33 @@ export function activate(ctx: vscode.ExtensionContext): void {
   const maxDiffLines = cfg.get<number>("maxDiffLines", 200);
   const voiceEnabledInitial = cfg.get<boolean>("voiceEnabled", true);
   const voiceVolumeInitial = cfg.get<number>("voiceVolume", 0.5);
+  const autoSpawnDaemon = cfg.get<boolean>("autoSpawnDaemon", true);
 
   const output = vscode.window.createOutputChannel("Coding Buddy");
   ctx.subscriptions.push(output);
+
+  if (autoSpawnDaemon) {
+    void (async () => {
+      if (await probeDaemonPort(port)) {
+        output.appendLine(`Daemon already listening on :${port} — skipping auto-spawn.`);
+        return;
+      }
+      const script = findDaemonScript(ctx.extensionPath);
+      if (!script) {
+        output.appendLine(
+          `Could not locate daemon/dist/index.js relative to ${ctx.extensionPath}. ` +
+            `Auto-spawn disabled — start the daemon manually with "pnpm dev:daemon".`
+        );
+        return;
+      }
+      output.appendLine(`Auto-spawning daemon: ${script} on :${port}`);
+      spawnedDaemon = spawnDaemon({
+        script,
+        port,
+        log: (line) => output.appendLine(line),
+      });
+    })();
+  }
 
   const bridge = new DaemonBridge(port, output);
   ctx.subscriptions.push({ dispose: () => bridge.dispose() });
@@ -343,6 +369,10 @@ export function activate(ctx: vscode.ExtensionContext): void {
 
 export function deactivate(): void {
   if (muteTimer) clearTimeout(muteTimer);
+  if (spawnedDaemon) {
+    spawnedDaemon.dispose();
+    spawnedDaemon = undefined;
+  }
 }
 
 function sendTrigger(

@@ -31,7 +31,7 @@ Source spec: `RESEARCH.md` §5.2 (MVP), §5.3 (post-MVP), §5.4 (cost model).
 
 ## Phase 3 — Lifecycle + UX polish
 
-- [ ] **3.1** Add `codingBuddy.autoSpawnDaemon` setting (default `true`). When enabled, the extension spawns the daemon via `child_process.spawn` on activation, pipes stderr to the existing output channel, and reaps it on `deactivate`. Skip if a daemon is already listening on the configured port.
+- [x] **3.1** Add `codingBuddy.autoSpawnDaemon` setting (default `true`). When enabled, the extension spawns the daemon via `child_process.spawn` on activation, pipes stderr to the existing output channel, and reaps it on `deactivate`. Skip if a daemon is already listening on the configured port.
 - [ ] **3.2** Bridge health probe: send `{type: "ping"}` on connect, surface `daemon down` / `daemon up` in the sidebar status pill. Test with mock WS endpoint.
 - [ ] **3.3** Persist mute state to `MemoryStore` so a daemon restart inside the 30-min mute window stays muted. Test mute persistence across `Session` reinstantiation.
 
