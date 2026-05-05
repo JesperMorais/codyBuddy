@@ -9,7 +9,7 @@ Source spec: `RESEARCH.md` §5.2 (MVP), §5.3 (post-MVP), §5.4 (cost model).
 ## Phase 0 — Floor
 
 - [x] **0.1** Add `test` script (`node --test test/*.test.mjs`) to `daemon/package.json` and `extension/package.json`. Add a root `pnpm test` that runs `pnpm -r test`. Verify all existing test files run green.
-- [ ] **0.2** Add `typecheck` script (`tsc --noEmit`) to `daemon/package.json` and `extension/package.json`. Add a root `pnpm typecheck` aggregating both. Fix any latent type errors that surface.
+- [x] **0.2** Add `typecheck` script (`tsc --noEmit`) to `daemon/package.json` and `extension/package.json`. Add a root `pnpm typecheck` aggregating both. Fix any latent type errors that surface.
 - [ ] **0.3** Add `.github/workflows/ci.yml` running pnpm install → typecheck → test on `windows-latest`, triggered on push and pull_request. Use `actions/setup-node@v4` (Node 20) and pnpm via `pnpm/action-setup@v3`.
 - [ ] **0.4** Reconcile env-var drift: README mentions `BUDDY_TTS_ENABLED`, daemon uses `BUDDY_TTS_BACKEND`. Pick `BUDDY_TTS_BACKEND` (values: `none|piper|kokoro`), update README, `.env.example`, and any code references. Add a unit test that the daemon refuses to start with an unknown backend.
 
