@@ -43,7 +43,7 @@ Three terminals (or one with `wt` split panes):
 # T1 — daemon
 pnpm dev:daemon
 
-# T2 — voice (optional; set BUDDY_TTS_ENABLED=true in .env to actually use it)
+# T2 — voice (optional; set BUDDY_TTS_BACKEND=piper|kokoro in .env to enable spoken output)
 pnpm dev:voice
 
 # T3 — extension: open the extension folder in VS Code, press F5 to launch

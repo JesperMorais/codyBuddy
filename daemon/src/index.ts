@@ -8,6 +8,7 @@ import { Session } from "./session.js";
 import { TtsBridge } from "./tts-bridge.js";
 import { SttBridge } from "./stt.js";
 import { Recorder } from "./recorder.js";
+import { parseTtsBackend } from "./config.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -19,9 +20,13 @@ if (!apiKey) {
 }
 
 const port = Number(process.env.BUDDY_DAEMON_PORT ?? 31415);
-const ttsBackend = (process.env.BUDDY_TTS_BACKEND ?? "none") as
-  | "none"
-  | "piper";
+let ttsBackend;
+try {
+  ttsBackend = parseTtsBackend(process.env.BUDDY_TTS_BACKEND);
+} catch (err) {
+  console.error(`[buddy-daemon] ${err instanceof Error ? err.message : err}`);
+  process.exit(1);
+}
 const piperExe = process.env.BUDDY_PIPER_EXE;
 const piperVoice = process.env.BUDDY_PIPER_VOICE;
 const ttsVolume = Number(process.env.BUDDY_TTS_VOLUME ?? "0.5");
