@@ -126,6 +126,49 @@ check("non-keyword suffix does not fire", "null", lookalike === null ? "null" : 
 const empty = engine.evaluateExplicit("");
 check("empty line does not fire", "null", empty === null ? "null" : empty.trigger);
 
+// === Task 1.4: focused STUCK_LOOP timing contract ===
+// Each scenario uses a fresh engine + fresh clock to isolate the three
+// conditions documented in the task: stuckMs > 90s, noEditMs > 60s, and
+// the negative case where a recent edit (<60s) suppresses the fire.
+
+// (A) Same diagnostic, 89s elapsed → must NOT fire (stuckMs <= 90s).
+{
+  let nowA = 1_000_000;
+  const eA = new TriggerEngine(() => nowA);
+  eA.noteEdit();
+  eA.evaluateDiagnostics(uri, errs); // first sight, records firstSeen
+  nowA += 89_000;                    // 89s later, same sig
+  const rA = eA.evaluateDiagnostics(uri, errs);
+  check("1.4 (A) 89s with same diag does NOT fire", "stuckMs=89s", rA.debug);
+  check("1.4 (A) no event", "null", rA.event === null ? "null" : rA.event.trigger);
+}
+
+// (B) Same diagnostic, 91s elapsed, no edits since first sight → MUST fire.
+{
+  let nowB = 2_000_000;
+  const eB = new TriggerEngine(() => nowB);
+  eB.noteEdit();
+  eB.evaluateDiagnostics(uri, errs); // first sight
+  nowB += 91_000;                    // past both 90s stuck and 60s noEdit
+  const rB = eB.evaluateDiagnostics(uri, errs);
+  check("1.4 (B) >90s with no edit fires", "FIRE", rB.debug);
+  check("1.4 (B) STUCK_LOOP event", "STUCK_LOOP", rB.event?.trigger ?? "");
+}
+
+// (C) Same diagnostic, >90s elapsed, but a fresh edit landed within 60s →
+//     must NOT fire (held by noEditMs).
+{
+  let nowC = 3_000_000;
+  const eC = new TriggerEngine(() => nowC);
+  eC.noteEdit();
+  eC.evaluateDiagnostics(uri, errs); // first sight
+  nowC += 91_000;                    // 91s elapsed total
+  eC.noteEdit();                     // fresh edit right now → noEditMs == 0
+  const rC = eC.evaluateDiagnostics(uri, errs);
+  check("1.4 (C) recent edit holds despite 91s stuck", "noEditMs=0s<=60", rC.debug);
+  check("1.4 (C) no event", "null", rC.event === null ? "null" : rC.event.trigger);
+}
+
 console.log(results.join("\n"));
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
