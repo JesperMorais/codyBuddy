@@ -1,0 +1,15 @@
+{
+  "name": "monitor-teacher",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Live coding buddy: VS Code extension + Node daemon + Python TTS sidecar",
+  "scripts": {
+    "build": "pnpm -r build",
+    "dev:daemon": "pnpm --filter buddy-daemon dev",
+    "dev:voice": "cd voice && uvicorn main:app --port 31416 --reload"
+  },
+  "packageManager": "pnpm@9.0.0",
+  "engines": {
+    "node": ">=20"
+  }
+}

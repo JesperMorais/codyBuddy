@@ -1,0 +1,136 @@
+import Anthropic from "@anthropic-ai/sdk";
+
+export interface BuddyReply {
+  mode: "speak" | "chat" | "no_op";
+  text: string;
+  wants_followup: boolean;
+}
+
+export class AnthropicClient {
+  private client: Anthropic;
+  private model: string;
+
+  constructor(apiKey: string, model: string) {
+    this.client = new Anthropic({ apiKey });
+    this.model = model;
+  }
+
+  async ask(
+    systemPrompt: string,
+    sessionSummary: string,
+    triggerPayload: object,
+    learnerProfile: string = ""
+  ): Promise<BuddyReply> {
+    const systemBlocks: Array<{
+      type: "text";
+      text: string;
+      cache_control?: { type: "ephemeral" };
+    }> = [
+      { type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } },
+    ];
+    if (learnerProfile) {
+      systemBlocks.push({
+        type: "text",
+        text: `What I've noticed about this developer over time:\n${learnerProfile}`,
+        cache_control: { type: "ephemeral" },
+      });
+    }
+
+    const stream = this.client.messages.stream({
+      model: this.model,
+      max_tokens: 400,
+      system: systemBlocks,
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: `Session summary so far:\n${sessionSummary || "(none yet)"}`,
+              cache_control: { type: "ephemeral" },
+            },
+            {
+              type: "text",
+              text: JSON.stringify(triggerPayload, null, 2),
+            },
+          ],
+        },
+      ],
+    });
+
+    const final = await stream.finalMessage();
+    const textBlock = final.content.find((b) => b.type === "text");
+    const raw = textBlock && "text" in textBlock ? textBlock.text.trim() : "";
+
+    if (process.env.BUDDY_DEBUG_RAW === "true") {
+      console.log(`[anthropic raw] ${raw.slice(0, 400)}${raw.length > 400 ? "..." : ""}`);
+    }
+
+    if (!raw || raw === "NO_OP") {
+      return { mode: "no_op", text: "", wants_followup: false };
+    }
+
+    try {
+      const parsed = JSON.parse(this.extractJson(raw));
+      const text =
+        parsed.text ?? parsed.message ?? parsed.content ?? parsed.response ?? "";
+      const mode: BuddyReply["mode"] = parsed.mode ?? (text ? "chat" : "no_op");
+      return {
+        mode,
+        text: String(text),
+        wants_followup: !!parsed.wants_followup,
+      };
+    } catch {
+      return { mode: "chat", text: raw, wants_followup: false };
+    }
+  }
+
+  async summarize(transcript: string): Promise<string> {
+    const res = await this.client.messages.create({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 250,
+      system:
+        "Summarize the developer's last 30 minutes of activity into 5-8 terse bullets focused on: what they're building, blockers hit, misconceptions shown, things they got right. No fluff.",
+      messages: [{ role: "user", content: transcript }],
+    });
+    const block = res.content.find((b) => b.type === "text");
+    return block && "text" in block ? block.text : "";
+  }
+
+  async distillLearnerProfile(history: string, priorProfile: string): Promise<string> {
+    const res = await this.client.messages.create({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 400,
+      system: `You maintain a long-term learner profile for a developer based on their interactions with a coding buddy. Your job: distill recurring patterns. Output 5-10 bullets, grouped under exactly these headings (omit a heading if empty):
+
+## Recurring misconceptions
+(things they've gotten wrong more than once — be specific: language, concept, what they confused it with)
+
+## Strengths
+(things they consistently get right — include patterns, languages, idioms)
+
+## Current focus
+(what they appear to be learning or building right now)
+
+## Topics covered
+(short tag list of subjects discussed)
+
+Be terse. Update the prior profile with new evidence; don't repeat unchanged facts. If the prior profile contradicts new evidence, prefer new evidence.`,
+      messages: [
+        {
+          role: "user",
+          content: `Prior profile:\n${priorProfile || "(none)"}\n\nNew interaction history (most recent last):\n${history}`,
+        },
+      ],
+    });
+    const block = res.content.find((b) => b.type === "text");
+    return block && "text" in block ? block.text.trim() : priorProfile;
+  }
+
+  private extractJson(raw: string): string {
+    const start = raw.indexOf("{");
+    const end = raw.lastIndexOf("}");
+    if (start === -1 || end === -1) return raw;
+    return raw.slice(start, end + 1);
+  }
+}

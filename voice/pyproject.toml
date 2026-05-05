@@ -1,0 +1,12 @@
+[project]
+name = "buddy-voice"
+version = "0.1.0"
+description = "Kokoro TTS sidecar for Coding Buddy"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.30",
+  "kokoro-onnx>=0.4.0",
+  "sounddevice>=0.5.0",
+  "numpy>=1.26",
+]

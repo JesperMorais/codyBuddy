@@ -1,0 +1,21 @@
+node_modules/
+dist/
+out/
+*.vsix
+.env
+.env.*
+!.env.example
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.vscode-test/
+
+# Downloaded voice/STT binaries and models (fetched by setup-*.ps1)
+voice/piper/
+voice/whisper/
+voice/voices/
+*.onnx
+*.bin
+*.exe
+*.dll

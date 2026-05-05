@@ -1,0 +1,136 @@
+{
+  "name": "coding-buddy-vscode",
+  "displayName": "Coding Buddy",
+  "description": "Pedagogical pair-programmer that watches your editor and asks the right Socratic question at the right time.",
+  "version": "0.1.0",
+  "publisher": "monitor-teacher",
+  "private": true,
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "coding-buddy.ask",
+        "title": "Coding Buddy: Ask a question"
+      },
+      {
+        "command": "coding-buddy.muteToggle",
+        "title": "Coding Buddy: Quiet for 30 min (toggle)"
+      },
+      {
+        "command": "coding-buddy.openSidebar",
+        "title": "Coding Buddy: Open sidebar"
+      },
+      {
+        "command": "coding-buddy.switchMode",
+        "title": "Coding Buddy: Switch mode"
+      },
+      {
+        "command": "coding-buddy.showReport",
+        "title": "Coding Buddy: Show learning report"
+      },
+      {
+        "command": "coding-buddy.refreshReport",
+        "title": "Coding Buddy: Refresh learning report"
+      },
+      {
+        "command": "coding-buddy.toggleVoice",
+        "title": "Coding Buddy: Toggle voice output"
+      },
+      {
+        "command": "coding-buddy.testVoice",
+        "title": "Coding Buddy: Test voice"
+      },
+      {
+        "command": "coding-buddy.setVolume",
+        "title": "Coding Buddy: Set voice volume"
+      },
+      {
+        "command": "coding-buddy.toggleRecord",
+        "title": "Coding Buddy: Toggle voice recording"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "coding-buddy.ask",
+        "key": "ctrl+alt+q"
+      },
+      {
+        "command": "coding-buddy.muteToggle",
+        "key": "ctrl+alt+shift+m"
+      },
+      {
+        "command": "coding-buddy.toggleRecord",
+        "key": "ctrl+alt+v"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "coding-buddy",
+          "title": "Coding Buddy",
+          "icon": "$(comment-discussion)"
+        }
+      ]
+    },
+    "views": {
+      "coding-buddy": [
+        {
+          "id": "coding-buddy.sidebar",
+          "name": "Coding Buddy",
+          "type": "webview"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Coding Buddy",
+      "properties": {
+        "codingBuddy.daemonPort": {
+          "type": "number",
+          "default": 31415,
+          "description": "Port the buddy daemon listens on (loopback only)."
+        },
+        "codingBuddy.idleSeconds": {
+          "type": "number",
+          "default": 300,
+          "description": "Idle threshold for IDLE_LONG trigger."
+        },
+        "codingBuddy.maxDiffLines": {
+          "type": "number",
+          "default": 200,
+          "description": "Max lines of recent diff sent per trigger."
+        },
+        "codingBuddy.voiceEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Speak replies aloud when the buddy chooses speak mode (uses the OS speech synthesizer via the webview)."
+        },
+        "codingBuddy.voiceVolume": {
+          "type": "number",
+          "default": 0.5,
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Voice output volume (0.0–1.0). Applies to the daemon TTS backend (Piper)."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsc -p .",
+    "watch": "tsc -p . -w"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/vscode": "^1.95.0",
+    "@types/ws": "^8.5.12",
+    "typescript": "^5.5.4"
+  }
+}
