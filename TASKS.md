@@ -19,7 +19,7 @@ Source spec: `RESEARCH.md` §5.2 (MVP), §5.3 (post-MVP), §5.4 (cost model).
 - [x] **1.2** Daemon WS integration test: boot the WS server in-process with the fake client, send `{type: "trigger", trigger: "EXPLICIT_ASK", payload: {...}}`, assert a `reply` message arrives with `mode !== "no_op"`.
 - [x] **1.3** Extend `extension/test/triggers.test.mjs` to cover all four trigger comment suffixes (` AI?`, ` AI!`, ` WHY?`, ` STUCK`) plus negative cases (no trigger, mid-line occurrence).
 - [x] **1.4** STUCK_LOOP timing test using the existing injectable `clock` arg: verify it does NOT fire under 90s with the same diagnostic, DOES fire after 90s with no edit, and DOES NOT fire if an edit was made within 60s.
-- [ ] **1.5** Mute test on `Session`: after `mute(30)`, non-`EXPLICIT_ASK` triggers return `{mode: "no_op"}`; `EXPLICIT_ASK` still goes through.
+- [x] **1.5** Mute test on `Session`: after `mute(30)`, non-`EXPLICIT_ASK` triggers return `{mode: "no_op"}`; `EXPLICIT_ASK` still goes through.
 - [ ] **1.6** Redactor test: `isDeniedFile` rejects `.env`, `id_rsa`, `*.pem`, `*.key`, `**/secrets/**`. `scrubSecrets` replaces `sk-…`, AWS access key, GitHub PAT, Slack tokens with `<REDACTED-SECRET>` and reports a hit count.
 - [ ] **1.7** Optional real-API smoke test gated on `ANTHROPIC_API_KEY` env. Skipped in CI; runnable locally. Asserts the tutor system prompt + a synthetic trigger payload returns a parseable `BuddyReply`.
 
