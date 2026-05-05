@@ -60,7 +60,21 @@ export function activate(ctx: vscode.ExtensionContext): void {
   ctx.subscriptions.push(status);
 
   let availableModes: string[] = ["tutor"];
-  let lastMode = "";
+  let lastMode = "tutor";
+  let daemonUp = false;
+  const refreshStatus = () => {
+    const icon = daemonUp ? "$(comment-discussion)" : "$(circle-slash)";
+    const suffix = daemonUp ? "" : " · daemon down";
+    status.text = `${icon} Buddy: ${lastMode}${suffix}`;
+    status.tooltip = daemonUp
+      ? "Click to switch Coding Buddy mode"
+      : "Daemon not reachable on the configured port. Click to switch mode (will queue).";
+  };
+  bridge.onHealth(({ up }) => {
+    daemonUp = up;
+    refreshStatus();
+  });
+
   bridge.onAudioOwner(({ owner, backend }) => {
     if (owner === "daemon") {
       sidebar.setVoice(false);
@@ -73,11 +87,12 @@ export function activate(ctx: vscode.ExtensionContext): void {
 
   bridge.onMode(({ mode, available, ok }) => {
     if (available.length) availableModes = available;
-    status.text = `$(comment-discussion) Buddy: ${mode}`;
-    if (ok && mode !== lastMode && lastMode !== "") {
+    const previous = lastMode;
+    lastMode = mode;
+    refreshStatus();
+    if (ok && mode !== previous && previous !== "") {
       void vscode.window.setStatusBarMessage(`Coding Buddy mode → ${mode}`, 2000);
     }
-    lastMode = mode;
   });
 
   ctx.subscriptions.push(
