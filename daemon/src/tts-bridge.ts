@@ -5,7 +5,17 @@ import { join } from "node:path";
 
 export type TtsBackend = "none" | "piper" | "kokoro";
 
-export interface TtsConfig {
+/**
+ * Test seams. Production code passes none of these — defaults to the real
+ * node:child_process.spawn, node:fs.existsSync, and globalThis.fetch.
+ */
+export interface TtsTestHooks {
+  spawnImpl?: typeof spawn;
+  fetchImpl?: typeof fetch;
+  existsImpl?: (path: string) => boolean;
+}
+
+export interface TtsConfig extends TtsTestHooks {
   backend: TtsBackend;
   piperExe?: string;
   piperVoice?: string;
@@ -82,27 +92,29 @@ export class TtsBridge {
     if (this.cfg.backend !== "piper") return;
     const exe = this.cfg.piperExe;
     const voice = this.cfg.piperVoice;
-    if (!exe || !voice || !existsSync(exe) || !existsSync(voice)) {
+    const exists = this.cfg.existsImpl ?? existsSync;
+    if (!exe || !voice || !exists(exe) || !exists(voice)) {
       throw new Error(`piper not configured: exe=${exe} voice=${voice}`);
     }
 
     const wavDir = mkdtempSync(join(tmpdir(), "buddy-tts-"));
     const wavPath = join(wavDir, "out.wav");
 
+    const spawnFn = this.cfg.spawnImpl ?? spawn;
     await new Promise<void>((resolve, reject) => {
-      const piper = spawn(exe, ["--model", voice, "--output_file", wavPath], {
+      const piper = spawnFn(exe, ["--model", voice, "--output_file", wavPath], {
         windowsHide: true,
       });
       let stderr = "";
-      piper.stderr.on("data", (d) => (stderr += d.toString()));
+      piper.stderr?.on("data", (d) => (stderr += d.toString()));
       piper.on("error", reject);
       piper.on("close", (code) =>
         code === 0
           ? resolve()
           : reject(new Error(`piper exit ${code}: ${stderr.slice(0, 200)}`))
       );
-      piper.stdin.write(text + "\n");
-      piper.stdin.end();
+      piper.stdin?.write(text + "\n");
+      piper.stdin?.end();
     });
 
     await playWavWindows(wavPath, this.volume());
@@ -115,7 +127,8 @@ export class TtsBridge {
 
   private async speakViaKokoro(text: string): Promise<void> {
     const url = this.cfg.kokoroUrl ?? DEFAULT_KOKORO_URL;
-    const res = await fetch(url, {
+    const fetchFn = this.cfg.fetchImpl ?? fetch;
+    const res = await fetchFn(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text }),
