@@ -26,7 +26,7 @@ Source spec: `RESEARCH.md` §5.2 (MVP), §5.3 (post-MVP), §5.4 (cost model).
 ## Phase 2 — Reconcile voice paths
 
 - [x] **2.1** Add `kokoro` backend to `tts-bridge.ts`: when `BUDDY_TTS_BACKEND=kokoro`, POST to `http://127.0.0.1:31416/tts` instead of spawning Piper. Keep `piper` and `none` paths intact.
-- [ ] **2.2** Unit test for `tts-bridge.ts`: stub `fetch`/`spawn`; verify the right backend is invoked for each value of `BUDDY_TTS_BACKEND`, including `none` (no-op).
+- [x] **2.2** Unit test for `tts-bridge.ts`: stub `fetch`/`spawn`; verify the right backend is invoked for each value of `BUDDY_TTS_BACKEND`, including `none` (no-op).
 - [ ] **2.3** Voice sidecar smoke test: spawn `voice/main.py` (FastAPI), hit `/health`, assert 200. Skip if Python or uvicorn unavailable. Verify `/tts` degrades gracefully when `kokoro_onnx` not installed (returns `skipped: kokoro-not-installed`).
 
 ## Phase 3 — Lifecycle + UX polish
