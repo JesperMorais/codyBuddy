@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync, unlinkSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-export type TtsBackend = "none" | "piper";
+export type TtsBackend = "none" | "piper" | "kokoro";
 
 export interface TtsConfig {
   backend: TtsBackend;
@@ -26,6 +26,7 @@ export class TtsBridge {
     if (this.cfg.backend === "none") return "off";
     if (this.cfg.backend === "piper")
       return `piper (vol=${this.volume().toFixed(2)})`;
+    if (this.cfg.backend === "kokoro") return "kokoro (not yet wired — Task 2.1)";
     return this.cfg.backend;
   }
 
