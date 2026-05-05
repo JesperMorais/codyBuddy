@@ -63,6 +63,25 @@ Source spec: `RESEARCH.md` §5.2 (MVP), §5.3 (post-MVP), §5.4 (cost model).
 - [ ] **8.1** Rewrite `README.md` to match real behavior post-Phase 2 and Phase 3: document `BUDDY_TTS_BACKEND` values, the auto-spawn behavior, all hotkeys, and the test commands. Keep "Definition of done" but link each checkbox to its automated test.
 - [ ] **8.2** Generate `CHANGELOG.md` from git log (Keep-a-Changelog format). Add a CI step or script to refresh it.
 
+## Phase 9 — Personalities
+
+Personality is a tone overlay orthogonal to mode (global, not per-mode). Mode prompts keep all hard rules; personality only governs voice/vocabulary. Default `nice`. NSFW is explicitly NOT supported on the Anthropic path — see 9.9.
+
+- [ ] **9.1** Add `daemon/prompts/personalities/{nice,dry,rude,drill_sergeant,passive_aggressive,pirate,shakespearean}.md`. Each ~20-40 lines: tone, vocab cues, 2-3 example phrasings, explicit "obey all rules in the role prompt; only change *how* you say things" clause. `nice` is the neutral baseline.
+- [ ] **9.2** Loader: scan `daemon/prompts/personalities/` in `daemon/src/index.ts` into a second `Map<string,string>`. Pass to `Session` constructor alongside existing mode prompts.
+- [ ] **9.3** Extend `Session`: add `personality` field, `getPersonality/setPersonality/listPersonalities`. Replace the single `systemPrompt: string` with `systemBlocks: string[]` returning `[modePrompt, personalityOverlay]` (overlay omitted when `nice`). Update `AnthropicClient.ask` signature to accept ordered system text blocks; each block keeps its own `cache_control`. Initial value from `BUDDY_PERSONALITY` env, default `nice`.
+- [ ] **9.4** WS protocol: add `setPersonality` / `getPersonality` message types. Include `personality` and `availablePersonalities` in the existing `modeSet` ack payload so the sidebar gets both dimensions in one message.
+- [ ] **9.5** Persist personality to `MemoryStore` (same mechanism as mute persistence in 3.3). On daemon restart, restore the last-selected personality. Test: set personality, reinstantiate `Session` against the same `MemoryStore`, assert it survives.
+- [ ] **9.6** Random-personality opt-in: add `BUDDY_PERSONALITY=random` (and a sidebar toggle). When enabled, pick a different personality per `handleTrigger` from `listPersonalities()`, excluding the previous one. Off by default. Test: with a seeded RNG, two consecutive triggers receive different personalities.
+- [ ] **9.7** Tests:
+  - Snapshot: `setMode("tutor") + setPersonality("rude")` produces the expected ordered system blocks sent to the fake client. Repeat for `nice` (overlay omitted) and one more combo.
+  - `setPersonality("does_not_exist")` returns `false`, leaves state unchanged, no throw.
+  - Switching personality mid-session does not corrupt `recent_chat` or memory.
+  - Random mode produces a different personality across N=10 triggers (seeded RNG).
+- [ ] **9.8** Sidebar UI: add a personality dropdown next to the existing mode picker plus a "shuffle" checkbox for random mode. Persist to workspace state. Wire to the new WS messages. Minimal styling.
+- [ ] **9.9** Uncensored path via Ollama (depends on 7.2): when `BUDDY_PROVIDER=ollama`, allow an `nsfw` personality file to load (gated behind the local provider). On `BUDDY_PROVIDER=anthropic`, `setPersonality("nsfw")` returns `false` with a clear error. Test: provider switch correctly enables/disables the personality.
+- [ ] **9.10** README + `.env.example`: document `BUDDY_PERSONALITY`, list shipped personalities, document the shuffle toggle, and explicitly note that `nsfw` requires `BUDDY_PROVIDER=ollama` and is unavailable on Anthropic.
+
 ---
 
 ## Working agreement
