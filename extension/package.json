@@ -53,6 +53,10 @@
       {
         "command": "coding-buddy.toggleRecord",
         "title": "Coding Buddy: Toggle voice recording"
+      },
+      {
+        "command": "coding-buddy.hardMute",
+        "title": "Coding Buddy: Hard mute (kill mic + TTS now)"
       }
     ],
     "keybindings": [
@@ -63,6 +67,10 @@
       {
         "command": "coding-buddy.muteToggle",
         "key": "ctrl+alt+shift+m"
+      },
+      {
+        "command": "coding-buddy.hardMute",
+        "key": "ctrl+shift+m"
       },
       {
         "command": "coding-buddy.toggleRecord",

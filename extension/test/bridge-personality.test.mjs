@@ -131,6 +131,24 @@ test("9.8 bridge.onMode defaults shuffle to false when the daemon omits it", asy
   }
 });
 
+test("10.4 bridge.hardMute() sends {type:'hardMute'} over the WS", async () => {
+  const { wss, received } = makeServer();
+  const port = await listen(wss);
+  const bridge = new DaemonBridge(port, makeOutput());
+  try {
+    await new Promise((r) => setTimeout(r, 100));
+    bridge.hardMute();
+    await new Promise((r) => setTimeout(r, 50));
+    const hm = received.find((m) => m.type === "hardMute");
+    assert.ok(hm, "hardMute frame must reach the daemon");
+    // Hard-mute is a one-shot kill switch; no payload required.
+    assert.equal(Object.keys(hm).length, 1, "hardMute frame should carry no extra fields");
+  } finally {
+    bridge.dispose();
+    await new Promise((r) => wss.close(r));
+  }
+});
+
 test("9.8 bridge.setMode/setPersonality still send the correct WS message types", async () => {
   const { wss, received } = makeServer();
   const port = await listen(wss);

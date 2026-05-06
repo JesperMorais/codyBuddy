@@ -58,6 +58,7 @@ In the dev-host VS Code window, the **Coding Buddy** view appears in the activit
 |-----|--------|
 | `Ctrl+Alt+Q` | Ask the buddy something (input box → answer in sidebar) |
 | `Ctrl+Alt+Shift+M` | Quiet for 30 minutes (toggle, persisted across daemon restarts) |
+| `Ctrl+Shift+M` | **Hard mute** — kills mic input and any in-flight TTS in <50ms (Task 10.4) |
 | `Ctrl+Alt+V` | Push-to-talk — start/stop recording for voice ask |
 
 Plus these **Command Palette** entries (no default keybinding):
