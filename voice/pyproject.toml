@@ -15,8 +15,17 @@ dependencies = [
 # silero-vad pulls in torch (~150MB). Optional so users on the
 # chat-only path can skip the download.
 #   pip install -e .[vad]
+# XTTS-v2 (Task 12.3) pulls in coqui-TTS + torch — large (~2GB once
+# the XTTS-v2 checkpoint downloads). Required only for the
+# heavyweight character voices (drill_sergeant, pirate, etc).
+#   pip install -e .[xtts]
 [project.optional-dependencies]
 vad = [
   "silero-vad>=5.0",
   "torch>=2.0",
+]
+xtts = [
+  "TTS>=0.22",
+  "torch>=2.0",
+  "numpy>=1.26",
 ]
