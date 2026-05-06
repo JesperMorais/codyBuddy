@@ -149,6 +149,163 @@ def _pcm16_to_tensor(buf: bytes):
     return torch.tensor(samples, dtype=torch.float32) / 32768.0
 
 
+# --------------------------------------------------------------------------
+# Streaming TTS — Task 10.3
+# --------------------------------------------------------------------------
+#
+# Protocol on /tts/stream:
+#   client → server  : text frame {"text": str, "voice": str?} per sentence
+#                       Send a text frame {"done": true} to indicate
+#                       end-of-utterance (server flushes any in-flight synth
+#                       and then closes from its side).
+#   server → client  : interleaved
+#       text  {"type":"sentence_start","idx":N,"sample_rate":24000,"channels":1}
+#       binary <PCM frame>           # 0..M frames of raw Int16 LE PCM
+#       text  {"type":"sentence_done","idx":N}
+#       …repeat for each accepted sentence…
+#       text  {"type":"done"}        # all sentences flushed
+#
+# Each sentence is dispatched to a worker as soon as it arrives, so a
+# slow second sentence doesn't block the first one's audio reaching
+# the daemon. The "first audio chunk arrives <150ms after first
+# sentence sent" budget is the test contract — see
+# daemon/test/tts-stream.test.mjs.
+#
+# Graceful-degrade matches /vad and /tts: if kokoro_onnx isn't
+# installed, the endpoint sends one {"type":"error",...} frame and
+# closes 1011 so the daemon's reconnect loop can latch.
+
+# Kokoro emits a single (samples, sample_rate) tuple per sentence; we
+# slice that into ~80ms chunks so the daemon can start playback before
+# the whole utterance is in hand. 80ms at 24kHz mono int16 = 3840
+# bytes — small enough for low latency, large enough to keep WS
+# overhead reasonable.
+_TTS_STREAM_CHUNK_MS = 80
+
+
+def _slice_int16(samples_array, sample_rate: int, chunk_ms: int):
+    """Yields successive slices of a numpy/list-like int16 array, each
+    `chunk_ms` long at `sample_rate`. The final slice is whatever
+    remains. Bytes-only — converts each slice to a bytes object."""
+    import numpy as np
+
+    arr = np.asarray(samples_array)
+    if arr.dtype != np.int16:
+        # Kokoro returns float32 in [-1,1]; convert for the wire.
+        arr = (np.clip(arr, -1.0, 1.0) * 32767).astype(np.int16)
+    samples_per_chunk = max(1, int(sample_rate * chunk_ms / 1000))
+    for i in range(0, len(arr), samples_per_chunk):
+        yield arr[i : i + samples_per_chunk].tobytes()
+
+
+@app.websocket("/tts/stream")
+async def tts_stream(ws: WebSocket):
+    await ws.accept()
+
+    # Lazy-load Kokoro through the same path /tts uses so we share the
+    # cached engine across HTTP and WS callers.
+    async with _tts_lock:
+        kokoro = _load_kokoro()
+
+    if not kokoro:
+        await ws.send_text(
+            json.dumps(
+                {
+                    "type": "error",
+                    "reason": "kokoro-not-installed",
+                }
+            )
+        )
+        await ws.close(code=1011)
+        return
+
+    next_idx = 0
+    inflight: list[asyncio.Task] = []
+    send_lock = asyncio.Lock()
+
+    async def synth_one(idx: int, text: str, voice: str):
+        loop = asyncio.get_running_loop()
+        try:
+            samples, sample_rate = await loop.run_in_executor(
+                None, lambda: kokoro.create(text, voice=voice, speed=1.0, lang="en-us")
+            )
+        except Exception as exc:
+            log.warning("/tts/stream synth failed for idx=%d: %s", idx, exc)
+            async with send_lock:
+                try:
+                    await ws.send_text(
+                        json.dumps({"type": "sentence_error", "idx": idx, "reason": str(exc)})
+                    )
+                except Exception:
+                    pass
+            return
+        async with send_lock:
+            try:
+                await ws.send_text(
+                    json.dumps(
+                        {
+                            "type": "sentence_start",
+                            "idx": idx,
+                            "sample_rate": int(sample_rate),
+                            "channels": 1,
+                        }
+                    )
+                )
+                for chunk in _slice_int16(samples, int(sample_rate), _TTS_STREAM_CHUNK_MS):
+                    await ws.send_bytes(chunk)
+                await ws.send_text(json.dumps({"type": "sentence_done", "idx": idx}))
+            except Exception as exc:
+                log.warning("/tts/stream send failed for idx=%d: %s", idx, exc)
+
+    try:
+        while True:
+            msg = await ws.receive_text()
+            try:
+                payload = json.loads(msg)
+            except Exception:
+                await ws.send_text(
+                    json.dumps({"type": "error", "reason": f"bad json: {msg[:100]}"})
+                )
+                continue
+
+            if payload.get("done"):
+                # Flush in-flight synths, then signal done and close.
+                if inflight:
+                    await asyncio.gather(*inflight, return_exceptions=True)
+                inflight.clear()
+                async with send_lock:
+                    try:
+                        await ws.send_text(json.dumps({"type": "done"}))
+                    except Exception:
+                        pass
+                await ws.close()
+                return
+
+            text = str(payload.get("text", "")).strip()
+            if not text:
+                continue
+            voice = str(payload.get("voice") or _voice_id)
+            idx = next_idx
+            next_idx += 1
+            inflight.append(asyncio.create_task(synth_one(idx, text, voice)))
+            # Drop completed tasks so the list doesn't grow unbounded.
+            inflight[:] = [t for t in inflight if not t.done()]
+    except WebSocketDisconnect:
+        # Client hung up mid-stream. Cancel any in-flight syntheses
+        # so we don't keep CPU-burning Kokoro work the daemon will
+        # never receive.
+        for t in inflight:
+            t.cancel()
+        return
+    except Exception as exc:
+        log.warning("/tts/stream loop error: %s", exc)
+        try:
+            await ws.send_text(json.dumps({"type": "error", "reason": str(exc)}))
+        except Exception:
+            pass
+        await ws.close(code=1011)
+
+
 @app.websocket("/vad")
 async def vad(ws: WebSocket):
     await ws.accept()
