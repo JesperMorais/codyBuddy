@@ -1,0 +1,214 @@
+// Two-tier router — Task 11.4.
+//
+// The conversation loop's primary cost lever. Most voice turns are
+// short ("yeah", "what about the import?", "no, the other one") and
+// don't need Sonnet — Haiku 4.5 handles them at a fraction of the
+// cost. The router runs Haiku first; Sonnet is only invoked when:
+//
+//   (a) the editor trigger is one of EXPLICIT_ASK / BAD_PATH /
+//       MISCONCEPTION (the user, by name, is asking for a real answer
+//       — or the editor flagged something the cheap tier would
+//       likely fumble),
+//   (b) the editor context changed since last turn (new file,
+//       new diff, new diagnostics — fresh ground that benefits from
+//       the bigger model's deeper analysis),
+//   (c) the rolling transcript has crossed a token threshold
+//       (longer conversations earn the upgrade — harder context),
+//   (d) Haiku itself returned `escalate: true` (it self-classified
+//       the turn as out of its weight class).
+//
+// The decision is binary: each turn ends up routed to exactly one
+// tier. Tests pin "Haiku says no-escalate → Sonnet never called" and
+// "each escalation condition → Sonnet called exactly once."
+//
+// Wiring: in production the router replaces the direct
+// AnthropicClient.askStream call inside the ConversationLoop's
+// completeUtterance dependency. This module is decoupled from the
+// loop so the routing logic can be exercised on its own.
+
+import type { BuddyReply } from "./anthropic.js";
+
+/** Cheap classifier+responder. The Haiku-tier verdict is one of:
+ *    - {escalate: true}    → router must call Sonnet for the actual reply
+ *    - {escalate: false, text} → Haiku already produced the reply
+ *
+ *  The production implementation is a single Haiku call instructed to
+ *  reply with a short conversational answer OR the literal token
+ *  "ESCALATE" if it can't handle the turn. Tests stub this directly.
+ */
+export interface HaikuClassifier {
+  classify(payload: object, systemBlocks: string[]): Promise<HaikuVerdict>;
+}
+
+export type HaikuVerdict =
+  | { escalate: true }
+  | { escalate: false; text: string };
+
+/** Subset of AnthropicClient the Sonnet path needs — streaming only.
+ *  The chat/sidebar path keeps using `ask` directly. */
+export interface StreamingResponder {
+  askStream(
+    systemBlocks: string[],
+    payload: object,
+    signal?: AbortSignal
+  ): AsyncIterable<string>;
+}
+
+export interface TieredRouterOptions {
+  haiku: HaikuClassifier;
+  sonnet: StreamingResponder;
+  /** Estimated-token threshold above which transcript size forces
+   *  escalation. Default 1500 tokens (~6 KB of text). */
+  transcriptTokenThreshold?: number;
+  /** Pluggable token estimator (default: chars/4 — close enough for
+   *  routing decisions). Tests override this with a length-equals
+   *  function so threshold values stay readable. */
+  estimateTokens?: (text: string) => number;
+  /** Optional log hook. Telemetry (Task 11.5) will subscribe here. */
+  log?: (line: string) => void;
+}
+
+export interface RouteOutcome {
+  tier: "haiku" | "sonnet";
+  reason: string;
+}
+
+const ESCALATING_TRIGGERS: ReadonlySet<string> = new Set([
+  "EXPLICIT_ASK",
+  "BAD_PATH",
+  "MISCONCEPTION",
+]);
+
+interface RouterPayload {
+  trigger?: string;
+  active_file?: string;
+  recent_diff?: string;
+  diagnostics?: Array<{ message?: string }>;
+  recent_chat?: Array<{ role?: string; text?: string }>;
+  user_question?: string;
+}
+
+export class TieredRouter {
+  private lastEditorFingerprint?: string;
+  private threshold: number;
+  private estimate: (text: string) => number;
+  private log: (line: string) => void;
+  private lastOutcome?: RouteOutcome;
+
+  constructor(private opts: TieredRouterOptions) {
+    this.threshold = opts.transcriptTokenThreshold ?? 1500;
+    this.estimate = opts.estimateTokens ?? defaultEstimate;
+    this.log = opts.log ?? (() => {});
+  }
+
+  /** Pure inspection: does the payload alone (no Haiku call needed)
+   *  force Sonnet? Conditions (a), (b), (c). Returns the reason so
+   *  telemetry can attribute escalations. */
+  shouldEscalateUpfront(payload: object): { escalate: boolean; reason: string } {
+    const p = payload as RouterPayload;
+    if (p.trigger && ESCALATING_TRIGGERS.has(p.trigger)) {
+      return { escalate: true, reason: `trigger=${p.trigger}` };
+    }
+    const fp = editorFingerprint(p);
+    if (this.lastEditorFingerprint !== undefined && fp !== this.lastEditorFingerprint) {
+      return { escalate: true, reason: "editor_context_changed" };
+    }
+    const tokens = this.estimateTranscriptTokens(p);
+    if (tokens > this.threshold) {
+      return { escalate: true, reason: "transcript_token_threshold" };
+    }
+    return { escalate: false, reason: "" };
+  }
+
+  /** Route one conversational turn. Yields text deltas from whichever
+   *  tier handles it. The editor fingerprint is updated after the
+   *  turn so the *next* call can detect context drift via (b). */
+  async *route(
+    systemBlocks: string[],
+    payload: object,
+    signal?: AbortSignal
+  ): AsyncIterable<string> {
+    const upfront = this.shouldEscalateUpfront(payload);
+    if (upfront.escalate) {
+      this.lastOutcome = { tier: "sonnet", reason: upfront.reason };
+      this.log(`[router] sonnet (${upfront.reason})`);
+      try {
+        for await (const chunk of this.opts.sonnet.askStream(systemBlocks, payload, signal)) {
+          yield chunk;
+        }
+      } finally {
+        this.updateFingerprint(payload);
+      }
+      return;
+    }
+
+    const verdict = await this.opts.haiku.classify(payload, systemBlocks);
+    if (verdict.escalate) {
+      this.lastOutcome = { tier: "sonnet", reason: "haiku_flagged_escalate" };
+      this.log(`[router] sonnet (haiku_flagged_escalate)`);
+      try {
+        for await (const chunk of this.opts.sonnet.askStream(systemBlocks, payload, signal)) {
+          yield chunk;
+        }
+      } finally {
+        this.updateFingerprint(payload);
+      }
+      return;
+    }
+
+    this.lastOutcome = { tier: "haiku", reason: "no_escalation" };
+    this.log(`[router] haiku`);
+    try {
+      yield verdict.text;
+    } finally {
+      this.updateFingerprint(payload);
+    }
+  }
+
+  /** Last routing decision — for telemetry / tests. Undefined before
+   *  the first route() call. */
+  getLastOutcome(): RouteOutcome | undefined {
+    return this.lastOutcome;
+  }
+
+  private estimateTranscriptTokens(p: RouterPayload): number {
+    const turns = p.recent_chat ?? [];
+    const text =
+      turns.map((t) => t.text ?? "").join("\n") +
+      (p.user_question ? `\n${p.user_question}` : "");
+    return this.estimate(text);
+  }
+
+  private updateFingerprint(payload: object): void {
+    this.lastEditorFingerprint = editorFingerprint(payload as RouterPayload);
+  }
+}
+
+/** Stable signature of the editor-context-bearing fields. Anything
+ *  observably different between two turns flips the fingerprint and
+ *  triggers escalation (b). */
+function editorFingerprint(p: RouterPayload): string {
+  const file = p.active_file ?? "";
+  const diff = p.recent_diff ?? "";
+  const diags = (p.diagnostics ?? []).map((d) => d.message ?? "").join("|");
+  return `${file}::${diff.length}::${diff}::${diags}`;
+}
+
+function defaultEstimate(text: string): number {
+  return Math.ceil(text.length / 4);
+}
+
+/** Helper for callers that need the same shape ConversationLoop
+ *  currently expects from completeUtterance: a function that takes
+ *  (payload, signal) and returns AsyncIterable<string>. Wraps a
+ *  router so the loop can plug it in without referencing systemBlocks
+ *  on every turn — those come from Session.buildSystemBlocks. */
+export function asCompleteUtterance(
+  router: TieredRouter,
+  getSystemBlocks: () => string[]
+): (payload: object, signal: AbortSignal) => AsyncIterable<string> {
+  return (payload, signal) => router.route(getSystemBlocks(), payload, signal);
+}
+
+// Re-export for clarity at call sites.
+export type { BuddyReply };
