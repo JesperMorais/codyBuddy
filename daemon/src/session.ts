@@ -21,6 +21,7 @@ export class Session {
   private mode: string;
   private memory: MemoryStore;
   private screenpipe?: ScreenpipeClient;
+  private personalities: Map<string, string>;
 
   constructor(
     private client: AiClient,
@@ -30,18 +31,26 @@ export class Session {
       defaultMode?: string;
       memory?: MemoryStore;
       screenpipe?: ScreenpipeClient;
+      personalities?: Map<string, string>;
     } = {}
   ) {
     this.maxSpokenPerHour = opts.maxSpokenPerHour ?? 2;
     this.mode = opts.defaultMode ?? "tutor";
     this.memory = opts.memory ?? new MemoryStore();
     this.screenpipe = opts.screenpipe;
+    this.personalities = opts.personalities ?? new Map();
     if (!this.prompts.has(this.mode)) {
       throw new Error(`No prompt loaded for default mode "${this.mode}"`);
     }
     // Restore mute state across daemon restarts. Stale (already-expired)
     // values are filtered out by MemoryStore.getMutedUntil itself.
     this.mutedUntil = this.memory.getMutedUntil();
+  }
+
+  /** Returns the loaded personality overlay names. Behaviour-agnostic for
+   *  Task 9.2 — Task 9.3 wires these into the system prompt. */
+  listPersonalities(): string[] {
+    return [...this.personalities.keys()];
   }
 
   getMemory(): MemoryStore {

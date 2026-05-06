@@ -45,14 +45,28 @@ const whisperExe = process.env.BUDDY_WHISPER_EXE;
 const whisperModel = process.env.BUDDY_WHISPER_MODEL;
 const model = process.env.BUDDY_MODEL ?? "claude-sonnet-4-6";
 
-const promptsDir = resolve(__dirname, "../prompts");
-const prompts = new Map<string, string>();
-for (const f of readdirSync(promptsDir)) {
-  if (!f.endsWith(".md")) continue;
-  const name = basename(f, ".md");
-  prompts.set(name, readFileSync(resolve(promptsDir, f), "utf8"));
+function loadPromptDir(dir: string): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const f of readdirSync(dir)) {
+    if (!f.endsWith(".md")) continue;
+    const name = basename(f, ".md");
+    map.set(name, readFileSync(resolve(dir, f), "utf8"));
+  }
+  return map;
 }
+
+const promptsDir = resolve(__dirname, "../prompts");
+const prompts = loadPromptDir(promptsDir);
 console.log(`[buddy-daemon] loaded modes: ${[...prompts.keys()].join(", ")}`);
+
+const personalitiesDir = resolve(promptsDir, "personalities");
+let personalities = new Map<string, string>();
+try {
+  personalities = loadPromptDir(personalitiesDir);
+  console.log(`[buddy-daemon] loaded personalities: ${[...personalities.keys()].join(", ")}`);
+} catch (err) {
+  console.warn(`[buddy-daemon] no personalities dir at ${personalitiesDir}`, err);
+}
 
 let client: AiClient;
 if (provider === "ollama") {
@@ -71,7 +85,7 @@ const screenpipe = screenpipeUrl
 if (screenpipe) {
   console.log(`[buddy-daemon] Screenpipe enabled at ${screenpipeUrl}`);
 }
-const session = new Session(client, prompts, { screenpipe });
+const session = new Session(client, prompts, { screenpipe, personalities });
 const tts = new TtsBridge({
   backend: ttsBackend,
   piperExe,
