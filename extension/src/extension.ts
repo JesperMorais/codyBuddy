@@ -99,13 +99,18 @@ export function activate(ctx: vscode.ExtensionContext): void {
   };
   sidebar.setControls(initialControls);
 
-  bridge.onMode(({ mode, available, personality, availablePersonalities, shuffle, ok }) => {
+  bridge.onMode(({ mode, available, personality, availablePersonalities, shuffle, ok, reason }) => {
     if (available.length) availableModes = available;
     const previous = lastMode;
     lastMode = mode;
     refreshStatus();
     if (ok && mode !== previous && previous !== "") {
       void vscode.window.setStatusBarMessage(`Coding Buddy mode → ${mode}`, 2000);
+    }
+    if (!ok && reason) {
+      // Surface the daemon's rejection so the user sees *why* the
+      // dropdown snapped back (e.g. nsfw on the Anthropic provider).
+      sidebar.pushStatus(`Could not switch: ${reason}`);
     }
     sidebar.setControls({ mode, available, personality, availablePersonalities, shuffle });
     void wsState.update("buddy.mode", mode);
