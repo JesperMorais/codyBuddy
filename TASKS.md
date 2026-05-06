@@ -38,7 +38,7 @@ Source spec: `RESEARCH.md` §5.2 (MVP), §5.3 (post-MVP), §5.4 (cost model).
 ## Phase 4 — Cost optimization (two-tier classifier)
 
 - [x] **4.1** Add `AnthropicClient.shouldSpeak(payload, summary)` using Haiku 4.5 returning `speak | chat | no_op`. Wire `Session.handleTrigger` to skip the Sonnet call when Haiku returns `no_op`.
-- [ ] **4.2** Test: with a stub Haiku returning `no_op`, the Sonnet `ask` method is never invoked. With `speak`, both are called.
+- [x] **4.2** Test: with a stub Haiku returning `no_op`, the Sonnet `ask` method is never invoked. With `speak`, both are called.
 - [ ] **4.3** Token-cost telemetry: log `{input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens}` from each API response to `~/.claude-buddy/telemetry.jsonl`. Add a daemon test that the file is appended to per turn.
 
 ## Phase 5 — Trigger quality + misconception memory
