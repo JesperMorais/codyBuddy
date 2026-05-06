@@ -1,0 +1,12 @@
+{
+  "trigger": "EXPLICIT_ASK",
+  "active_file": "src/cache/lru.ts",
+  "selection": {
+    "line": 42,
+    "text": "  this.map.delete(key); this.map.set(key, value);"
+  },
+  "diagnostics": [],
+  "recent_diff": "",
+  "recent_terminal": [],
+  "user_question": "explain why we delete-then-set instead of just set"
+}
