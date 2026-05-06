@@ -13,12 +13,31 @@
  * After the call, fake.calls.ask holds the recorded arguments.
  */
 export class FakeAnthropicClient {
-  constructor({ replies = [], summary = "(fake summary)", profile = "(fake profile)" } = {}) {
+  constructor({
+    replies = [],
+    decisions = [],
+    summary = "(fake summary)",
+    profile = "(fake profile)",
+    defaultDecision = "speak",
+  } = {}) {
     this._replies = [...replies];
+    this._decisions = [...decisions];
     this._defaultReply = { mode: "no_op", text: "", wants_followup: false };
+    this._defaultDecision = defaultDecision;
     this._summary = summary;
     this._profile = profile;
-    this.calls = { ask: [], summarize: [], distillLearnerProfile: [] };
+    this.calls = {
+      ask: [],
+      shouldSpeak: [],
+      summarize: [],
+      distillLearnerProfile: [],
+    };
+  }
+
+  async shouldSpeak(triggerPayload, sessionSummary) {
+    this.calls.shouldSpeak.push({ triggerPayload, sessionSummary });
+    if (this._decisions.length === 0) return this._defaultDecision;
+    return this._decisions.shift();
   }
 
   async ask(systemPrompt, sessionSummary, triggerPayload, learnerProfile = "") {

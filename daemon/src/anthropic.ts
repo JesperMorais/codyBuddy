@@ -6,11 +6,22 @@ export interface BuddyReply {
   wants_followup: boolean;
 }
 
+/** Verdict from the cheap Haiku gate that decides whether the expensive
+ *  Sonnet round-trip is worth doing for a given trigger. */
+export type SpeakDecision = "speak" | "chat" | "no_op";
+
 /**
  * Subset of the Anthropic-backed client that Session depends on.
  * Tests can substitute a fake implementation.
  */
 export interface AiClient {
+  /**
+   * Cheap pre-flight: should the buddy actually engage with this trigger?
+   * Implemented with Haiku 4.5 in the production client. When the verdict
+   * is `no_op`, Session short-circuits and never calls `ask` (saves a
+   * Sonnet round-trip).
+   */
+  shouldSpeak(triggerPayload: object, sessionSummary: string): Promise<SpeakDecision>;
   ask(
     systemPrompt: string,
     sessionSummary: string,
@@ -97,6 +108,32 @@ export class AnthropicClient implements AiClient {
       };
     } catch {
       return { mode: "chat", text: raw, wants_followup: false };
+    }
+  }
+
+  async shouldSpeak(triggerPayload: object, sessionSummary: string): Promise<SpeakDecision> {
+    try {
+      const res = await this.client.messages.create({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 8,
+        system:
+          "You are a fast gate for a coding buddy. Given a trigger event from the user's editor, decide whether the buddy should: speak (high confidence the user benefits from a spoken nudge), chat (worth a sidebar reply but not voice), or no_op (stay silent). Reply with EXACTLY one of: speak, chat, no_op. No punctuation, no explanation.",
+        messages: [
+          {
+            role: "user",
+            content: `Session summary:\n${sessionSummary || "(none)"}\n\nTrigger event:\n${JSON.stringify(triggerPayload, null, 2)}`,
+          },
+        ],
+      });
+      const block = res.content.find((b) => b.type === "text");
+      const raw = block && "text" in block ? block.text.trim().toLowerCase() : "";
+      if (raw === "speak" || raw === "chat" || raw === "no_op") return raw;
+      // Anything else is treated as "chat" — don't silence the user on a
+      // garbled gate response, but don't promote to spoken either.
+      return "chat";
+    } catch (err) {
+      console.error("[anthropic] shouldSpeak failed, defaulting to chat:", err);
+      return "chat";
     }
   }
 

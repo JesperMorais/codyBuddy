@@ -77,6 +77,16 @@ export class Session {
       return { mode: "no_op", text: "", wants_followup: false };
     }
 
+    // Cheap Haiku gate: skip the Sonnet call entirely when the gate says
+    // no_op. EXPLICIT_ASK bypasses the gate — the user explicitly asked,
+    // never silence them on a probabilistic verdict.
+    if (trigger !== "EXPLICIT_ASK") {
+      const decision = await this.client.shouldSpeak(payload, this.summary);
+      if (decision === "no_op") {
+        return { mode: "no_op", text: "", wants_followup: false };
+      }
+    }
+
     this.rolloverHourBucket();
 
     const recent_chat = this.events.slice(-5).map((e) => ({
