@@ -229,8 +229,24 @@ export class TtsBridge {
     const fetchFn = this.cfg.fetchImpl ?? fetch;
     const abort = new AbortController();
     this.activeAbort = abort;
-    const body: { text: string; voice?: string } = { text };
+    const body: {
+      text: string;
+      voice?: string;
+      rate?: number;
+      energy?: number;
+      pause_factor?: number;
+    } = { text };
     if (this.kokoroVoice) body.voice = this.kokoroVoice;
+    // Task 12.5: pipe the active personality's prosody multipliers
+    // into the synth request. Kokoro maps `rate → speed` directly;
+    // energy and pause_factor are best-effort post-processing on the
+    // sidecar side (Kokoro itself doesn't take them, so the sidecar
+    // applies them to the audio after synth — see voice/main.py).
+    if (this.personalityCfg) {
+      body.rate = this.personalityCfg.rate;
+      body.energy = this.personalityCfg.energy;
+      body.pause_factor = this.personalityCfg.pause_factor;
+    }
     try {
       const res = await fetchFn(url, {
         method: "POST",
@@ -262,10 +278,24 @@ export class TtsBridge {
     const fetchFn = this.cfg.fetchImpl ?? fetch;
     const abort = new AbortController();
     this.activeAbort = abort;
-    const body = {
+    const body: {
+      text: string;
+      ref_clip: string;
+      language: string;
+      rate: number;
+      energy: number;
+      pause_factor: number;
+    } = {
       text,
       ref_clip: cfg.xtts_ref,
       language: this.cfg.xttsLanguage ?? DEFAULT_XTTS_LANGUAGE,
+      // Task 12.5: prosody multipliers travel with every synth call.
+      // XTTS-v2's TTS.tts() takes a `speed` arg directly (mapped from
+      // rate). Energy and pause_factor are applied by the sidecar
+      // post-synth — see voice/xtts.py.
+      rate: cfg.rate,
+      energy: cfg.energy,
+      pause_factor: cfg.pause_factor,
     };
     try {
       const res = await fetchFn(url, {

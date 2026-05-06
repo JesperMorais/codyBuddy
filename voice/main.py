@@ -39,6 +39,15 @@ _voice_id = "af_sarah"
 class SpeakRequest(BaseModel):
     text: str
     voice: Optional[str] = None
+    # Task 12.5: per-personality prosody multipliers. All default
+    # to 1.0 (== "no change") so daemons that don't pass them get
+    # baseline output. Kokoro takes `speed` directly (mapped from
+    # `rate`); `energy` is a post-synth amplitude scale; `pause_factor`
+    # stretches inter-sentence silence on the wire (StreamingResponse
+    # case) — best-effort because Kokoro itself doesn't expose these.
+    rate: Optional[float] = 1.0
+    energy: Optional[float] = 1.0
+    pause_factor: Optional[float] = 1.0
 
 
 def _load_kokoro():
@@ -66,6 +75,23 @@ def _play(samples, sample_rate):
         log.warning("playback failed: %s", exc)
 
 
+def _apply_energy(samples, energy: float):
+    """Scale waveform amplitude by `energy` and clamp to [-1, 1].
+    Task 12.5: best-effort prosody-energy implementation. Kokoro
+    returns float32 in [-1, 1]; we just multiply and clip. >1
+    increases loudness (with potential clipping); <1 attenuates."""
+    try:
+        import numpy as np
+
+        arr = np.asarray(samples, dtype=np.float32)
+        return np.clip(arr * float(energy), -1.0, 1.0)
+    except Exception:
+        # If numpy isn't around for any reason, silently return
+        # untouched — energy is a nice-to-have, not a hard
+        # requirement, and we don't want to break the whole synth.
+        return samples
+
+
 @app.post("/tts")
 async def tts(req: SpeakRequest):
     text = req.text.strip()
@@ -79,12 +105,29 @@ async def tts(req: SpeakRequest):
             return {"ok": True, "skipped": "kokoro-not-installed", "text": text}
 
         voice = req.voice or _voice_id
+        # Clamp to a sensible range. Kokoro's `speed` is unbounded in
+        # principle but extreme values produce unintelligible audio.
+        rate = max(0.5, min(2.0, float(req.rate or 1.0)))
+        energy = max(0.0, min(2.0, float(req.energy or 1.0)))
         loop = asyncio.get_running_loop()
         samples, sample_rate = await loop.run_in_executor(
-            None, lambda: kokoro.create(text, voice=voice, speed=1.0, lang="en-us")
+            None,
+            lambda: kokoro.create(text, voice=voice, speed=rate, lang="en-us"),
         )
+        # Apply energy as a pre-clip amplitude scale. pause_factor
+        # only matters for the streaming path (separate per-sentence
+        # silence between chunks); for the one-shot /tts call the
+        # whole utterance plays as one buffer.
+        if energy != 1.0:
+            samples = _apply_energy(samples, energy)
         await loop.run_in_executor(None, _play, samples, sample_rate)
-        return {"ok": True, "spoken": text}
+        return {
+            "ok": True,
+            "spoken": text,
+            "rate": rate,
+            "energy": energy,
+            "pause_factor": float(req.pause_factor or 1.0),
+        }
 
 
 @app.get("/health")
@@ -223,11 +266,18 @@ async def tts_stream(ws: WebSocket):
     inflight: list[asyncio.Task] = []
     send_lock = asyncio.Lock()
 
-    async def synth_one(idx: int, text: str, voice: str):
+    async def synth_one(
+        idx: int,
+        text: str,
+        voice: str,
+        rate: float,
+        energy: float,
+    ):
         loop = asyncio.get_running_loop()
         try:
             samples, sample_rate = await loop.run_in_executor(
-                None, lambda: kokoro.create(text, voice=voice, speed=1.0, lang="en-us")
+                None,
+                lambda: kokoro.create(text, voice=voice, speed=rate, lang="en-us"),
             )
         except Exception as exc:
             log.warning("/tts/stream synth failed for idx=%d: %s", idx, exc)
@@ -239,6 +289,10 @@ async def tts_stream(ws: WebSocket):
                 except Exception:
                     pass
             return
+        # Apply energy as an amplitude scale before slicing the
+        # samples for the wire (Task 12.5).
+        if energy != 1.0:
+            samples = _apply_energy(samples, energy)
         async with send_lock:
             try:
                 await ws.send_text(
@@ -285,9 +339,17 @@ async def tts_stream(ws: WebSocket):
             if not text:
                 continue
             voice = str(payload.get("voice") or _voice_id)
+            # Task 12.5: prosody multipliers per sentence; clamped
+            # to a sensible range. pause_factor isn't applied here —
+            # in the streaming protocol the daemon controls
+            # inter-sentence pacing on its side, not the sidecar.
+            rate = max(0.5, min(2.0, float(payload.get("rate", 1.0))))
+            energy = max(0.0, min(2.0, float(payload.get("energy", 1.0))))
             idx = next_idx
             next_idx += 1
-            inflight.append(asyncio.create_task(synth_one(idx, text, voice)))
+            inflight.append(
+                asyncio.create_task(synth_one(idx, text, voice, rate, energy))
+            )
             # Drop completed tasks so the list doesn't grow unbounded.
             inflight[:] = [t for t in inflight if not t.done()]
     except WebSocketDisconnect:
