@@ -178,6 +178,33 @@ export class MemoryStore {
     }
   }
 
+  /** Returns the persisted shuffle flag (random-personality mode), or
+   *  null if nothing was ever written. Kept separate from
+   *  personality.json because shuffle is orthogonal to the
+   *  user's preferred seed personality. */
+  getShuffle(): boolean | null {
+    const path = join(this.dir, "shuffle.json");
+    if (!existsSync(path)) return null;
+    try {
+      const raw = readFileSync(path, "utf8");
+      const parsed = JSON.parse(raw) as { shuffle?: unknown };
+      if (typeof parsed.shuffle === "boolean") return parsed.shuffle;
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Persists the shuffle flag. Best-effort — disk failures are
+   *  swallowed so the in-memory toggle is unaffected. */
+  setShuffle(value: boolean): void {
+    try {
+      writeFileSync(join(this.dir, "shuffle.json"), JSON.stringify({ shuffle: value }), "utf8");
+    } catch {
+      // best effort
+    }
+  }
+
   paths(): {
     dir: string;
     log: string;
@@ -185,6 +212,7 @@ export class MemoryStore {
     mute: string;
     misconceptions: string;
     personality: string;
+    shuffle: string;
   } {
     return {
       dir: this.dir,
@@ -193,6 +221,7 @@ export class MemoryStore {
       mute: this.mutePath,
       misconceptions: this.misconceptionsPath,
       personality: this.personalityPath,
+      shuffle: join(this.dir, "shuffle.json"),
     };
   }
 }

@@ -85,11 +85,17 @@ const screenpipe = screenpipeUrl
 if (screenpipe) {
   console.log(`[buddy-daemon] Screenpipe enabled at ${screenpipeUrl}`);
 }
-const defaultPersonality = process.env.BUDDY_PERSONALITY ?? "nice";
+// `BUDDY_PERSONALITY=random` is a sentinel for the shuffle toggle, not
+// a personality name. The seed personality falls back to "nice" — the
+// first trigger will rotate to something else immediately.
+const envPersonality = process.env.BUDDY_PERSONALITY ?? "nice";
+const defaultShuffle = envPersonality === "random";
+const defaultPersonality = defaultShuffle ? "nice" : envPersonality;
 const session = new Session(client, prompts, {
   screenpipe,
   personalities,
   defaultPersonality,
+  defaultShuffle,
 });
 const tts = new TtsBridge({
   backend: ttsBackend,
