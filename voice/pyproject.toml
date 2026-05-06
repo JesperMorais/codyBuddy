@@ -1,12 +1,22 @@
 [project]
 name = "buddy-voice"
 version = "0.1.0"
-description = "Kokoro TTS sidecar for Coding Buddy"
+description = "Kokoro TTS + silero-vad sidecar for Coding Buddy"
 requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.115",
   "uvicorn[standard]>=0.30",
+  "websockets>=12.0",
   "kokoro-onnx>=0.4.0",
   "sounddevice>=0.5.0",
   "numpy>=1.26",
+]
+
+# silero-vad pulls in torch (~150MB). Optional so users on the
+# chat-only path can skip the download.
+#   pip install -e .[vad]
+[project.optional-dependencies]
+vad = [
+  "silero-vad>=5.0",
+  "torch>=2.0",
 ]
