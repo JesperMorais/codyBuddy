@@ -67,6 +67,95 @@ export class OllamaClient implements AiClient {
     return (json.choices?.[0]?.message?.content ?? "").trim();
   }
 
+  /** Task 11.1: streaming variant for the conversation loop. Uses
+   *  the OpenAI-compatible `stream:true` chat completion endpoint;
+   *  parses the Server-Sent Events stream and yields each delta's
+   *  text. Honors the abort signal by aborting the underlying fetch
+   *  so the local model stops generating promptly on barge-in. */
+  async *askStream(
+    systemBlocks: string[],
+    triggerPayload: object,
+    signal?: AbortSignal
+  ): AsyncIterable<string> {
+    const system = systemBlocks.filter((b) => b && b.length > 0).join("\n\n");
+    const userText = JSON.stringify(triggerPayload);
+    const ctrl = new AbortController();
+    const onParentAbort = () => ctrl.abort();
+    if (signal) {
+      if (signal.aborted) return;
+      signal.addEventListener("abort", onParentAbort, { once: true });
+    }
+    let res: Response;
+    try {
+      res = await this.fetchFn(`${this.baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: this.model,
+          stream: true,
+          messages: [
+            { role: "system", content: system },
+            { role: "user", content: userText },
+          ],
+        }),
+        signal: ctrl.signal,
+      });
+    } catch (err) {
+      if (signal) signal.removeEventListener("abort", onParentAbort);
+      // Aborted before the request even started — yield nothing.
+      const aborted = (err as { name?: string }).name === "AbortError";
+      if (aborted) return;
+      throw err;
+    }
+    if (!res.ok) {
+      if (signal) signal.removeEventListener("abort", onParentAbort);
+      throw new Error(`ollama HTTP ${res.status} ${res.statusText}`);
+    }
+    if (!res.body) {
+      if (signal) signal.removeEventListener("abort", onParentAbort);
+      return;
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    try {
+      while (true) {
+        if (signal?.aborted) break;
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        // OpenAI SSE format: lines beginning with "data: " separated
+        // by blank lines. The terminal sentinel is "data: [DONE]".
+        let nl: number;
+        while ((nl = buf.indexOf("\n")) >= 0) {
+          const line = buf.slice(0, nl).trim();
+          buf = buf.slice(nl + 1);
+          if (!line.startsWith("data:")) continue;
+          const payload = line.slice(5).trim();
+          if (payload === "[DONE]") return;
+          try {
+            const obj = JSON.parse(payload) as {
+              choices?: Array<{ delta?: { content?: string } }>;
+            };
+            const delta = obj.choices?.[0]?.delta?.content;
+            if (typeof delta === "string" && delta.length > 0) yield delta;
+          } catch {
+            // Malformed event line — skip it; the local model
+            // occasionally emits keep-alive comments.
+          }
+        }
+      }
+    } finally {
+      try {
+        reader.releaseLock();
+      } catch {
+        // ignore
+      }
+      if (signal) signal.removeEventListener("abort", onParentAbort);
+    }
+  }
+
   async ask(
     systemBlocks: string[],
     sessionSummary: string,

@@ -16,6 +16,8 @@ export class FakeAnthropicClient {
   constructor({
     replies = [],
     decisions = [],
+    streamChunks = [],
+    defaultStreamChunks = [],
     summary = "(fake summary)",
     profile = "(fake profile)",
     defaultDecision = "speak",
@@ -24,6 +26,8 @@ export class FakeAnthropicClient {
   } = {}) {
     this._replies = [...replies];
     this._decisions = [...decisions];
+    this._streamChunks = [...streamChunks];
+    this._defaultStreamChunks = [...defaultStreamChunks];
     this._defaultReply = { mode: "no_op", text: "", wants_followup: false };
     this._defaultDecision = defaultDecision;
     this._summary = summary;
@@ -32,6 +36,7 @@ export class FakeAnthropicClient {
     this._fakeUsage = fakeUsage;
     this.calls = {
       ask: [],
+      askStream: [],
       shouldSpeak: [],
       summarize: [],
       distillLearnerProfile: [],
@@ -49,6 +54,24 @@ export class FakeAnthropicClient {
     this._recordUsage("shouldSpeak", "claude-haiku-4-5-20251001");
     if (this._decisions.length === 0) return this._defaultDecision;
     return this._decisions.shift();
+  }
+
+  /** Task 11.1: streaming variant for the conversation loop. Yields
+   *  preconfigured chunks from `streamChunks` (per-call, FIFO).
+   *  When no chunks are queued, yields nothing. Honors the abort
+   *  signal between chunk emits. */
+  async *askStream(systemBlocks, triggerPayload, signal) {
+    this.calls.askStream = this.calls.askStream ?? [];
+    this.calls.askStream.push({
+      systemBlocks: [...systemBlocks],
+      triggerPayload,
+    });
+    this._recordUsage("askStream", "claude-sonnet-4-6");
+    const chunks = this._streamChunks?.shift() ?? this._defaultStreamChunks ?? [];
+    for (const chunk of chunks) {
+      if (signal?.aborted) return;
+      yield chunk;
+    }
   }
 
   async ask(systemBlocks, sessionSummary, triggerPayload) {
