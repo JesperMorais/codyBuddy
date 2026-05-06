@@ -55,7 +55,7 @@ function loadCfg(name) {
 
 test("12.5 (a) Kokoro body carries rate/energy/pause_factor from active personality", async () => {
   const calls = [];
-  const bridge = new TtsBridge({ backend: "kokoro", fetchImpl: stubFetch(calls) });
+  const bridge = new TtsBridge({ backend: "auto", fetchImpl: stubFetch(calls) });
   const nice = loadCfg("nice");
   bridge.setPersonalityVoiceConfig(nice);
   await bridge.speak("hi");
@@ -69,7 +69,7 @@ test("12.5 (a) Kokoro body carries rate/energy/pause_factor from active personal
 
 test("12.5 (a) XTTS body carries rate/energy/pause_factor from active personality", async () => {
   const calls = [];
-  const bridge = new TtsBridge({ backend: "kokoro", fetchImpl: stubFetch(calls) });
+  const bridge = new TtsBridge({ backend: "auto", fetchImpl: stubFetch(calls) });
   const drill = loadCfg("drill_sergeant");
   bridge.setPersonalityVoiceConfig(drill);
   await bridge.speak("attention");
@@ -92,14 +92,14 @@ test("12.5 (a) drill_sergeant and nice send measurably different prosody", async
   const niceCalls = [];
 
   const bridgeDrill = new TtsBridge({
-    backend: "kokoro",
+    backend: "auto",
     fetchImpl: stubFetch(drillCalls),
   });
   bridgeDrill.setPersonalityVoiceConfig(loadCfg("drill_sergeant"));
   await bridgeDrill.speak("the same input text");
 
   const bridgeNice = new TtsBridge({
-    backend: "kokoro",
+    backend: "auto",
     fetchImpl: stubFetch(niceCalls),
   });
   bridgeNice.setPersonalityVoiceConfig(loadCfg("nice"));
@@ -133,7 +133,7 @@ test("12.5 (a) bridge omits prosody when no personality cfg is set", async () =>
   // config get baseline behavior — no rate/energy/pause_factor in
   // the body. Lets the sidecar's defaults apply.
   const calls = [];
-  const bridge = new TtsBridge({ backend: "kokoro", fetchImpl: stubFetch(calls) });
+  const bridge = new TtsBridge({ backend: "auto", fetchImpl: stubFetch(calls) });
   await bridge.speak("hi");
   await new Promise((r) => setTimeout(r, 5));
   assert.equal(calls.length, 1);
@@ -146,7 +146,7 @@ test("12.5 (a) all three prosody fields are passed through, not just rate", asyn
   // Custom personality config with all three knobs at non-default
   // values. The body should reflect each one verbatim.
   const calls = [];
-  const bridge = new TtsBridge({ backend: "kokoro", fetchImpl: stubFetch(calls) });
+  const bridge = new TtsBridge({ backend: "auto", fetchImpl: stubFetch(calls) });
   bridge.setPersonalityVoiceConfig({
     voice_engine: "kokoro",
     kokoro_voice: "af_bella",
