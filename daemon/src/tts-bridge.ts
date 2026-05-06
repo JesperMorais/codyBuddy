@@ -2,8 +2,9 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { mkdtempSync, writeFileSync, unlinkSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { PersonalityConfig } from "./personality-config.js";
 
-export type TtsBackend = "none" | "piper" | "kokoro";
+export type TtsBackend = "none" | "piper" | "kokoro" | "xtts";
 
 /**
  * Test seams. Production code passes none of these — defaults to the real
@@ -21,10 +22,18 @@ export interface TtsConfig extends TtsTestHooks {
   piperVoice?: string;
   /** Endpoint of the Kokoro FastAPI sidecar (voice/main.py). Default: http://127.0.0.1:31416/tts */
   kokoroUrl?: string;
+  /** Endpoint of the XTTS-v2 FastAPI sidecar (voice/xtts.py). Default: http://127.0.0.1:31417/synth */
+  xttsUrl?: string;
+  /** Default language sent with each XTTS synth request. The XTTS-v2
+   *  model is multilingual; the daemon doesn't currently switch
+   *  languages mid-session, so this is a static config. */
+  xttsLanguage?: string;
   volume?: number;
 }
 
 const DEFAULT_KOKORO_URL = "http://127.0.0.1:31416/tts";
+const DEFAULT_XTTS_URL = "http://127.0.0.1:31417/synth";
+const DEFAULT_XTTS_LANGUAGE = "en";
 
 export class TtsBridge {
   private busy = false;
@@ -41,6 +50,14 @@ export class TtsBridge {
    *  kokoro_voice config. Undefined = let the sidecar pick its
    *  own default. */
   private kokoroVoice?: string;
+  /** Active personality voice config (Task 12.4). When the
+   *  personality's voice_engine is "xtts" and xtts_ref is set, the
+   *  bridge routes synth to the XTTS sidecar regardless of the
+   *  configured backend (the implicit "auto" routing — Task 12.6
+   *  will add explicit `BUDDY_TTS_BACKEND=auto|kokoro|xtts` knobs to
+   *  control this). Undefined = no personality override; route via
+   *  the constructor's backend. */
+  private personalityCfg?: PersonalityConfig;
 
   constructor(private cfg: TtsConfig) {}
 
@@ -57,6 +74,31 @@ export class TtsBridge {
     return this.kokoroVoice;
   }
 
+  /** Update the personality voice config (Task 12.4). The next speak()
+   *  consults it: voice_engine="xtts" + xtts_ref → XTTS path;
+   *  voice_engine="kokoro" or unset → fall through to the constructor's
+   *  configured backend. */
+  setPersonalityVoiceConfig(cfg?: PersonalityConfig): void {
+    this.personalityCfg = cfg;
+  }
+
+  /** Read the active personality voice config. */
+  getPersonalityVoiceConfig(): PersonalityConfig | undefined {
+    return this.personalityCfg;
+  }
+
+  /** Resolve the engine that the next speak() will actually use,
+   *  taking the personality override into account. Pure / for tests. */
+  effectiveEngine(): TtsBackend {
+    if (
+      this.personalityCfg?.voice_engine === "xtts" &&
+      this.personalityCfg.xtts_ref
+    ) {
+      return "xtts";
+    }
+    return this.cfg.backend;
+  }
+
   isActive(): boolean {
     return this.cfg.backend !== "none";
   }
@@ -67,6 +109,8 @@ export class TtsBridge {
       return `piper (vol=${this.volume().toFixed(2)})`;
     if (this.cfg.backend === "kokoro")
       return `kokoro (${this.cfg.kokoroUrl ?? DEFAULT_KOKORO_URL})`;
+    if (this.cfg.backend === "xtts")
+      return `xtts (${this.cfg.xttsUrl ?? DEFAULT_XTTS_URL})`;
     return this.cfg.backend;
   }
 
@@ -134,11 +178,16 @@ export class TtsBridge {
   }
 
   private async speakNow(text: string): Promise<void> {
-    if (this.cfg.backend === "kokoro") {
+    const engine = this.effectiveEngine();
+    if (engine === "xtts") {
+      await this.speakViaXtts(text);
+      return;
+    }
+    if (engine === "kokoro") {
       await this.speakViaKokoro(text);
       return;
     }
-    if (this.cfg.backend !== "piper") return;
+    if (engine !== "piper") return;
     const exe = this.cfg.piperExe;
     const voice = this.cfg.piperVoice;
     const exists = this.cfg.existsImpl ?? existsSync;
@@ -191,6 +240,51 @@ export class TtsBridge {
       });
       if (!res.ok) {
         throw new Error(`kokoro POST ${url} → HTTP ${res.status}`);
+      }
+    } finally {
+      if (this.activeAbort === abort) this.activeAbort = undefined;
+    }
+  }
+
+  /** Task 12.4: route synth to the XTTS-v2 sidecar (voice/xtts.py)
+   *  using the active personality's xtts_ref. The bridge drains the
+   *  response body and discards it for now — playback wiring lives
+   *  in Phase 12.6 / 12.5. The DoD here is "the request reaches the
+   *  sidecar with the right ref clip". */
+  private async speakViaXtts(text: string): Promise<void> {
+    const cfg = this.personalityCfg;
+    if (!cfg || cfg.voice_engine !== "xtts" || !cfg.xtts_ref) {
+      throw new Error(
+        "xtts engine selected but personality config has no xtts_ref"
+      );
+    }
+    const url = this.cfg.xttsUrl ?? DEFAULT_XTTS_URL;
+    const fetchFn = this.cfg.fetchImpl ?? fetch;
+    const abort = new AbortController();
+    this.activeAbort = abort;
+    const body = {
+      text,
+      ref_clip: cfg.xtts_ref,
+      language: this.cfg.xttsLanguage ?? DEFAULT_XTTS_LANGUAGE,
+    };
+    try {
+      const res = await fetchFn(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        signal: abort.signal,
+      });
+      if (!res.ok) {
+        throw new Error(`xtts POST ${url} → HTTP ${res.status}`);
+      }
+      // Drain the response body so the connection can close cleanly.
+      // Audio playback wiring is part of Phase 12.5 / 12.6 — for now
+      // we just verify the call landed.
+      try {
+        await res.arrayBuffer();
+      } catch {
+        // ignore — body may already be consumed by an upstream
+        // streaming response.
       }
     } finally {
       if (this.activeAbort === abort) this.activeAbort = undefined;

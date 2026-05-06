@@ -1,6 +1,6 @@
 import type { TtsBackend } from "./tts-bridge.js";
 
-const TTS_BACKENDS: readonly TtsBackend[] = ["none", "piper", "kokoro"];
+const TTS_BACKENDS: readonly TtsBackend[] = ["none", "piper", "kokoro", "xtts"];
 
 export function parseTtsBackend(raw: string | undefined): TtsBackend {
   if (raw === undefined || raw === "") return "none";

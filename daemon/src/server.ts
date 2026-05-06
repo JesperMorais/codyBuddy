@@ -4,6 +4,7 @@ import type { TtsBridge } from "./tts-bridge.js";
 import type { SttBridge } from "./stt.js";
 import type { Recorder } from "./recorder.js";
 import type { VoteStore } from "./votes.js";
+import type { PersonalityConfig } from "./personality-config.js";
 
 export interface ServerDeps {
   session: Session;
@@ -29,18 +30,31 @@ export interface ServerDeps {
    * configs.
    */
   kokoroVoiceFor?: Map<string, string>;
+  /**
+   * Optional `personality name → full voice config` lookup
+   * (Task 12.4). On a successful setPersonality, the server pushes
+   * the matching config into TtsBridge so XTTS routing
+   * (voice_engine="xtts" + xtts_ref) takes effect immediately.
+   * Personalities absent from this map fall through to the bridge's
+   * configured backend.
+   */
+  personalityVoiceConfigs?: Map<string, PersonalityConfig>;
 }
 
 export function startServer(deps: ServerDeps): WebSocketServer {
   const { session, tts, stt, recorder, port, votes } = deps;
   const gated = deps.gatedPersonalities ?? new Map<string, string>();
   const kokoroVoiceFor = deps.kokoroVoiceFor ?? new Map<string, string>();
-  // Apply the initial personality's Kokoro voice immediately so the
-  // first synth call after boot already uses the right voice — without
-  // this the bridge would fall back to its sidecar default until the
-  // user (re-)selected a personality.
+  const personalityVoiceConfigs =
+    deps.personalityVoiceConfigs ?? new Map<string, PersonalityConfig>();
+  // Apply the initial personality's voice config immediately so the
+  // first synth call after boot already routes to the right engine —
+  // without this the bridge would fall back to its constructor's
+  // backend until the user (re-)selected a personality.
   const initialVoice = kokoroVoiceFor.get(session.getPersonality());
   if (initialVoice) tts.setKokoroVoice(initialVoice);
+  const initialCfg = personalityVoiceConfigs.get(session.getPersonality());
+  if (initialCfg) tts.setPersonalityVoiceConfig(initialCfg);
   const wss = new WebSocketServer({ host: "127.0.0.1", port });
 
   // The modeSet ack carries every personality-axis dimension (mode,
@@ -243,6 +257,11 @@ export function startServer(deps: ServerDeps): WebSocketServer {
               // user changed personality.
               const voice = kokoroVoiceFor.get(target);
               if (voice) tts.setKokoroVoice(voice);
+              // Task 12.4: also push the full personality voice config
+              // so the bridge can route to XTTS when voice_engine=xtts.
+              // We pass the new config unconditionally — when missing,
+              // the bridge falls through to its constructor backend.
+              tts.setPersonalityVoiceConfig(personalityVoiceConfigs.get(target));
             }
             ws.send(modeAck(ok, reason));
             break;

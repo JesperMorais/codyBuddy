@@ -268,19 +268,25 @@ test("12.2 (b) failed setPersonality does NOT retarget the bridge", async () => 
 
 // --- (c) shipped config snapshot ---------------------------------
 
-test("12.2 (c) shipped configs match the spec mappings", () => {
+test("12.2 (c) shipped Kokoro configs match the spec mappings", () => {
   const { personalities } = loadPersonalities(promptsDir, "anthropic");
   const configs = loadPersonalityConfigs(personalitiesDir, personalities.keys());
-  // Spec assertions from TASKS.md 12.2:
+  // The three personalities the spec named explicitly stay on Kokoro.
   assert.equal(configs.get("nice")?.kokoro_voice, "af_bella");
   assert.equal(configs.get("dry")?.kokoro_voice, "am_adam");
   assert.equal(configs.get("passive_aggressive")?.kokoro_voice, "af_sarah");
-  // Extras beyond the spec — keep a snapshot so 12.4 can intentionally
-  // flip these to xtts later.
-  assert.equal(configs.get("rude")?.kokoro_voice, "am_michael");
-  assert.equal(configs.get("drill_sergeant")?.kokoro_voice, "am_adam");
-  assert.equal(configs.get("pirate")?.kokoro_voice, "am_michael");
-  assert.equal(configs.get("shakespearean")?.kokoro_voice, "am_adam");
+  // The remaining personalities (rude / drill_sergeant / pirate /
+  // shakespearean) were flipped to xtts in Task 12.4 — they should
+  // no longer carry a kokoro_voice at all.
+  for (const name of ["rude", "drill_sergeant", "pirate", "shakespearean"]) {
+    const cfg = configs.get(name);
+    assert.equal(cfg?.voice_engine, "xtts", `${name} should be xtts`);
+    assert.equal(
+      cfg?.kokoro_voice,
+      undefined,
+      `${name} should NOT carry a kokoro_voice after 12.4`
+    );
+  }
 });
 
 test("12.2 (c) every shipped Kokoro personality has a non-empty voice id", () => {

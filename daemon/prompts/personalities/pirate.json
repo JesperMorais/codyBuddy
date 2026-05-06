@@ -1,6 +1,6 @@
 {
-  "voice_engine": "kokoro",
-  "kokoro_voice": "am_michael",
+  "voice_engine": "xtts",
+  "xtts_ref": "refs/pirate.wav",
   "rate": 1.0,
   "energy": 1.15,
   "pause_factor": 1.0

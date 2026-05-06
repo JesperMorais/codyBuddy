@@ -1,6 +1,6 @@
 {
-  "voice_engine": "kokoro",
-  "kokoro_voice": "am_michael",
+  "voice_engine": "xtts",
+  "xtts_ref": "refs/rude.wav",
   "rate": 1.05,
   "energy": 1.1,
   "pause_factor": 0.9
