@@ -4,7 +4,21 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { PersonalityConfig } from "./personality-config.js";
 
-export type TtsBackend = "none" | "piper" | "kokoro" | "xtts";
+export type TtsBackend = "none" | "auto" | "piper" | "kokoro" | "xtts";
+
+/**
+ * "auto" is the only value that consults the active personality's
+ * voice_engine when picking an engine; everything else is an explicit
+ * override that wins over personality config (Task 12.6). When the
+ * effective engine resolves to a concrete value, it's one of:
+ *   - "xtts"   — POST to the XTTS sidecar
+ *   - "kokoro" — POST to the Kokoro sidecar
+ *   - "piper"  — local Piper subprocess
+ *   - "none"   — silent (queue drains as no-ops)
+ * "auto" never reaches the runtime branch directly; it's resolved by
+ * `effectiveEngine()` first.
+ */
+export type EffectiveTtsBackend = Exclude<TtsBackend, "auto">;
 
 /**
  * Test seams. Production code passes none of these — defaults to the real
@@ -50,13 +64,11 @@ export class TtsBridge {
    *  kokoro_voice config. Undefined = let the sidecar pick its
    *  own default. */
   private kokoroVoice?: string;
-  /** Active personality voice config (Task 12.4). When the
-   *  personality's voice_engine is "xtts" and xtts_ref is set, the
-   *  bridge routes synth to the XTTS sidecar regardless of the
-   *  configured backend (the implicit "auto" routing — Task 12.6
-   *  will add explicit `BUDDY_TTS_BACKEND=auto|kokoro|xtts` knobs to
-   *  control this). Undefined = no personality override; route via
-   *  the constructor's backend. */
+  /** Active personality voice config (Task 12.4). Only consulted
+   *  when the constructor's backend is "auto" — explicit backends
+   *  (kokoro/xtts/piper/none) win over personality config (Task
+   *  12.6). Undefined = no personality override; under "auto", the
+   *  bridge falls back to "kokoro" as the default voice path. */
   private personalityCfg?: PersonalityConfig;
 
   constructor(private cfg: TtsConfig) {}
@@ -87,16 +99,29 @@ export class TtsBridge {
     return this.personalityCfg;
   }
 
-  /** Resolve the engine that the next speak() will actually use,
-   *  taking the personality override into account. Pure / for tests. */
-  effectiveEngine(): TtsBackend {
+  /** Resolve the engine that the next speak() will actually use.
+   *  Task 12.6 routing rules:
+   *    - backend="auto" → personality voice_engine when set
+   *      (xtts requires xtts_ref); else "kokoro" as the default
+   *      live-voice path.
+   *    - backend="kokoro"/"xtts"/"piper"/"none" → explicit override,
+   *      always wins over personality config.
+   *  Pure / for tests. */
+  effectiveEngine(): EffectiveTtsBackend {
+    if (this.cfg.backend !== "auto") {
+      return this.cfg.backend;
+    }
     if (
       this.personalityCfg?.voice_engine === "xtts" &&
       this.personalityCfg.xtts_ref
     ) {
       return "xtts";
     }
-    return this.cfg.backend;
+    // Auto + (no personality OR kokoro personality OR xtts personality
+    // missing its ref clip) → fall back to Kokoro as the default
+    // live-voice engine. Users who want true silence in auto-mode
+    // should set BUDDY_TTS_BACKEND=none explicitly.
+    return "kokoro";
   }
 
   isActive(): boolean {
@@ -111,6 +136,11 @@ export class TtsBridge {
       return `kokoro (${this.cfg.kokoroUrl ?? DEFAULT_KOKORO_URL})`;
     if (this.cfg.backend === "xtts")
       return `xtts (${this.cfg.xttsUrl ?? DEFAULT_XTTS_URL})`;
+    if (this.cfg.backend === "auto") {
+      // Show what auto would resolve to right now so logs / status
+      // pills don't lie when the personality hasn't been touched yet.
+      return `auto → ${this.effectiveEngine()}`;
+    }
     return this.cfg.backend;
   }
 

@@ -132,9 +132,10 @@ node scripts/tune-triggers.mjs --min 10     # ignore triggers with < 10 votes
 | `BUDDY_OLLAMA_MODEL` | `qwen2.5-coder:32b` | Local model name. |
 | `BUDDY_DAEMON_PORT` | `31415` | Loopback WS port the daemon listens on. |
 | `BUDDY_PERSONALITY` | `nice` | Tone overlay on top of the active mode prompt. See [Personalities](#personalities) for the full list, the `random` shuffle mode, and the Ollama-only `nsfw` overlay. |
-| `BUDDY_TTS_BACKEND` | `none` | `none` / `piper` / `kokoro`. Daemon refuses to start on anything else. |
+| `BUDDY_TTS_BACKEND` | `none` | `none` / `auto` / `kokoro` / `xtts` / `piper`. `auto` lets the active personality pick the engine (XTTS-v2 for drill_sergeant / pirate / shakespearean / rude, Kokoro for everything else); explicit values override personality routing. Daemon refuses to start on anything else. |
 | `BUDDY_PIPER_EXE` / `BUDDY_PIPER_VOICE` | — | Piper executable + voice file when `BUDDY_TTS_BACKEND=piper`. |
-| `BUDDY_KOKORO_URL` | `http://127.0.0.1:31416/tts` | Kokoro FastAPI sidecar when `BUDDY_TTS_BACKEND=kokoro`. |
+| `BUDDY_KOKORO_URL` | `http://127.0.0.1:31416/tts` | Kokoro FastAPI sidecar when the effective engine is `kokoro`. |
+| `BUDDY_XTTS_URL` | `http://127.0.0.1:31417/synth` | XTTS-v2 FastAPI sidecar (`voice/xtts.py`) when the effective engine is `xtts`. |
 | `BUDDY_TTS_VOLUME` | `0.5` | 0.0–1.0. Applied by the Piper backend; Kokoro plays at sidecar default. |
 | `BUDDY_WHISPER_EXE` / `BUDDY_WHISPER_MODEL` | — | whisper.cpp paths for voice input (Ctrl+Alt+V). |
 | `BUDDY_BACKCHANNEL` | `on` | When the conversation loop is `LISTENING` and the user has been speaking >3s, plays a short `voice/backchannels/*.wav` clip (cooldown ≥8s). `off` disables. |

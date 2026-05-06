@@ -47,7 +47,7 @@ test("12.4 (a) bridge routes to XTTS when personality cfg has voice_engine=xtts 
     calls.push({ url, body: JSON.parse(init.body) });
     return { ok: true, status: 200, arrayBuffer: async () => new ArrayBuffer(0) };
   };
-  const bridge = new TtsBridge({ backend: "kokoro", fetchImpl });
+  const bridge = new TtsBridge({ backend: "auto", fetchImpl });
   bridge.setPersonalityVoiceConfig({
     voice_engine: "xtts",
     xtts_ref: "refs/drill_sergeant.wav",
@@ -72,7 +72,7 @@ test("12.4 (a) bridge stays on Kokoro when personality cfg is voice_engine=kokor
     calls.push({ url, body: JSON.parse(init.body) });
     return { ok: true, status: 200 };
   };
-  const bridge = new TtsBridge({ backend: "kokoro", fetchImpl });
+  const bridge = new TtsBridge({ backend: "auto", fetchImpl });
   bridge.setPersonalityVoiceConfig({
     voice_engine: "kokoro",
     kokoro_voice: "af_bella",
@@ -95,7 +95,7 @@ test("12.4 (a) bridge routes Kokoro when no personality cfg has been set", async
     calls.push({ url, body: JSON.parse(init.body) });
     return { ok: true, status: 200 };
   };
-  const bridge = new TtsBridge({ backend: "kokoro", fetchImpl });
+  const bridge = new TtsBridge({ backend: "auto", fetchImpl });
   // No setPersonalityVoiceConfig — fall through to backend.
   assert.equal(bridge.effectiveEngine(), "kokoro");
   await bridge.speak("hi");
@@ -113,7 +113,7 @@ test("12.4 (a) bridge falls through to backend when xtts cfg is missing xtts_ref
     calls.push({ url, body: JSON.parse(init.body) });
     return { ok: true, status: 200 };
   };
-  const bridge = new TtsBridge({ backend: "kokoro", fetchImpl });
+  const bridge = new TtsBridge({ backend: "auto", fetchImpl });
   bridge.setPersonalityVoiceConfig({
     voice_engine: "xtts",
     rate: 1.0,
@@ -134,7 +134,7 @@ test("12.4 (a) custom xttsUrl + xttsLanguage are honoured", async () => {
     return { ok: true, status: 200, arrayBuffer: async () => new ArrayBuffer(0) };
   };
   const bridge = new TtsBridge({
-    backend: "kokoro",
+    backend: "auto",
     fetchImpl,
     xttsUrl: "http://10.0.0.1:9999/synth",
     xttsLanguage: "fr",
@@ -176,7 +176,7 @@ async function bootDaemon(opts = {}) {
     fetchCalls.push({ url, body: JSON.parse(init.body) });
     return { ok: true, status: 200, arrayBuffer: async () => new ArrayBuffer(0) };
   };
-  const tts = new TtsBridge({ backend: "kokoro", fetchImpl });
+  const tts = new TtsBridge({ backend: "auto", fetchImpl });
   const memDir = mkdtempSync(join(tmpdir(), "buddy-12.4-mem-"));
   const memory = new MemoryStore(memDir);
   const fake = new FakeAnthropicClient({
