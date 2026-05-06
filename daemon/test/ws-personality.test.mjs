@@ -7,15 +7,23 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { WebSocket } from "ws";
 
 const { startServer } = await import("../dist/server.js");
 const { Session } = await import("../dist/session.js");
+const { MemoryStore } = await import("../dist/memory.js");
 const { TtsBridge } = await import("../dist/tts-bridge.js");
 const { SttBridge } = await import("../dist/stt.js");
 const { Recorder } = await import("../dist/recorder.js");
 const { FakeAnthropicClient } = await import("./fakes.mjs");
 
+// Per-test temp memory dir keeps the suite hermetic — without it the
+// 9.5 personality persistence layer would leak state between tests
+// and (worse) write into the developer's real ~/.coding-buddy on
+// every local run.
 function buildDeps({ defaultPersonality = "nice" } = {}) {
   const fake = new FakeAnthropicClient();
   const prompts = new Map([["tutor", "fake tutor system prompt"]]);
@@ -24,11 +32,23 @@ function buildDeps({ defaultPersonality = "nice" } = {}) {
     ["dry", "dry overlay"],
     ["pirate", "pirate overlay"],
   ]);
-  const session = new Session(fake, prompts, { personalities, defaultPersonality });
+  const memDir = mkdtempSync(join(tmpdir(), "buddy-ws-"));
+  const memory = new MemoryStore(memDir);
+  const session = new Session(fake, prompts, {
+    memory,
+    personalities,
+    defaultPersonality,
+  });
   const tts = new TtsBridge({ backend: "none" });
   const stt = new SttBridge({});
   const recorder = new Recorder();
-  return { session, tts, stt, recorder };
+  return {
+    session,
+    tts,
+    stt,
+    recorder,
+    cleanup: () => rmSync(memDir, { recursive: true, force: true }),
+  };
 }
 
 function waitListening(wss) {
@@ -97,6 +117,7 @@ test("9.4 (a) initial modeSet carries personality + availablePersonalities", asy
     }
   } finally {
     await closeServer(wss);
+    deps.cleanup();
   }
 });
 
@@ -121,6 +142,7 @@ test("9.4 (b) setPersonality switches personality and acks via modeSet", async (
     }
   } finally {
     await closeServer(wss);
+    deps.cleanup();
   }
 });
 
@@ -143,6 +165,7 @@ test("9.4 (c) setPersonality with unknown name acks ok:false and leaves state un
     }
   } finally {
     await closeServer(wss);
+    deps.cleanup();
   }
 });
 
@@ -166,6 +189,7 @@ test("9.4 (d) getPersonality replies with current modeSet snapshot", async () =>
     }
   } finally {
     await closeServer(wss);
+    deps.cleanup();
   }
 });
 
@@ -179,7 +203,10 @@ test("9.4 (e) setMode ack still carries the personality dimension", async () => 
     ["nice", "nice overlay"],
     ["dry", "dry overlay"],
   ]);
+  const memDir = mkdtempSync(join(tmpdir(), "buddy-ws-"));
+  const memory = new MemoryStore(memDir);
   const session = new Session(fake, prompts, {
+    memory,
     personalities,
     defaultPersonality: "dry",
   });
@@ -207,5 +234,6 @@ test("9.4 (e) setMode ack still carries the personality dimension", async () => 
     }
   } finally {
     await closeServer(wss);
+    rmSync(memDir, { recursive: true, force: true });
   }
 });
