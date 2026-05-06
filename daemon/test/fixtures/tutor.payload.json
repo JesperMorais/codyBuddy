@@ -1,0 +1,12 @@
+{
+  "trigger": "EXPLICIT_ASK",
+  "active_file": "src/utils/array.ts",
+  "selection": {
+    "line": 18,
+    "text": "  return arr.reduce((acc, x) => acc + x, 0);"
+  },
+  "diagnostics": [],
+  "recent_diff": "+ const total = sum(numbers);",
+  "recent_terminal": [],
+  "user_question": "what does reduce do here?"
+}

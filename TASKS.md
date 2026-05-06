@@ -50,7 +50,7 @@ Source spec: `RESEARCH.md` §5.2 (MVP), §5.3 (post-MVP), §5.4 (cost model).
 ## Phase 6 — Multi-mode validation
 
 - [x] **6.1** Mode-switch integration test: `setMode("architect")` then trigger; assert the system block content matches `daemon/prompts/architect.md`. Repeat for `explainer` and `reviewer`.
-- [ ] **6.2** Add `daemon/test/fixtures/` with one canonical trigger payload per mode. Snapshot-test the assembled `system` + `messages` array sent to Anthropic (against the fake client).
+- [x] **6.2** Add `daemon/test/fixtures/` with one canonical trigger payload per mode. Snapshot-test the assembled `system` + `messages` array sent to Anthropic (against the fake client).
 
 ## Phase 7 — Post-MVP integrations (optional, prioritize by ROI)
 

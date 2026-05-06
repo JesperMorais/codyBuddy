@@ -1,0 +1,9 @@
+{
+  "trigger": "NEW_TOPIC",
+  "active_file": "src/streaming/pipeline.ts",
+  "selection": null,
+  "diagnostics": [],
+  "recent_diff": "",
+  "recent_terminal": [],
+  "user_question": "how should I structure the streaming pipeline between the WS daemon and the voice sidecar?"
+}

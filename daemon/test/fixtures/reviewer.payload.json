@@ -1,0 +1,17 @@
+{
+  "trigger": "BAD_PATH",
+  "active_file": "src/api/handlers.ts",
+  "selection": null,
+  "diagnostics": [
+    { "severity": "Error", "message": "Argument of type 'string' is not assignable to parameter of type 'number'.", "line": 73 },
+    { "severity": "Error", "message": "Cannot find name 'parseUserId'.", "line": 81 },
+    { "severity": "Error", "message": "Property 'id' does not exist on type 'Request'.", "line": 96 }
+  ],
+  "recent_diff": "+ const id = req.query.userId;\n+ const user = await fetchUser(id);",
+  "recent_terminal": [
+    { "cmd": "pnpm test", "exit": 1 },
+    { "cmd": "pnpm test", "exit": 1 }
+  ],
+  "user_question": null,
+  "reason": "3 diagnostics + 2 failed runs"
+}
