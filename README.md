@@ -97,6 +97,7 @@ node scripts/tune-triggers.mjs --min 10     # ignore triggers with < 10 votes
 | `BUDDY_OLLAMA_URL` | `http://localhost:11434/v1` | OpenAI-compatible endpoint when `BUDDY_PROVIDER=ollama`. |
 | `BUDDY_OLLAMA_MODEL` | `qwen2.5-coder:32b` | Local model name. |
 | `BUDDY_DAEMON_PORT` | `31415` | Loopback WS port the daemon listens on. |
+| `BUDDY_PERSONALITY` | `nice` | Tone overlay applied on top of the active mode prompt. Other shipped values: `dry`, `rude`, `drill_sergeant`, `passive_aggressive`, `pirate`, `shakespearean`. |
 | `BUDDY_TTS_BACKEND` | `none` | `none` / `piper` / `kokoro`. Daemon refuses to start on anything else. |
 | `BUDDY_PIPER_EXE` / `BUDDY_PIPER_VOICE` | — | Piper executable + voice file when `BUDDY_TTS_BACKEND=piper`. |
 | `BUDDY_KOKORO_URL` | `http://127.0.0.1:31416/tts` | Kokoro FastAPI sidecar when `BUDDY_TTS_BACKEND=kokoro`. |

@@ -22,6 +22,7 @@ export class Session {
   private memory: MemoryStore;
   private screenpipe?: ScreenpipeClient;
   private personalities: Map<string, string>;
+  private personality: string;
 
   constructor(
     private client: AiClient,
@@ -32,6 +33,7 @@ export class Session {
       memory?: MemoryStore;
       screenpipe?: ScreenpipeClient;
       personalities?: Map<string, string>;
+      defaultPersonality?: string;
     } = {}
   ) {
     this.maxSpokenPerHour = opts.maxSpokenPerHour ?? 2;
@@ -39,6 +41,10 @@ export class Session {
     this.memory = opts.memory ?? new MemoryStore();
     this.screenpipe = opts.screenpipe;
     this.personalities = opts.personalities ?? new Map();
+    // Default to "nice" — the neutral baseline. "nice" is always
+    // accepted, even if it isn't in the personalities map (the overlay
+    // is simply omitted in that case).
+    this.personality = opts.defaultPersonality ?? "nice";
     if (!this.prompts.has(this.mode)) {
       throw new Error(`No prompt loaded for default mode "${this.mode}"`);
     }
@@ -47,10 +53,43 @@ export class Session {
     this.mutedUntil = this.memory.getMutedUntil();
   }
 
-  /** Returns the loaded personality overlay names. Behaviour-agnostic for
-   *  Task 9.2 — Task 9.3 wires these into the system prompt. */
   listPersonalities(): string[] {
     return [...this.personalities.keys()];
+  }
+
+  getPersonality(): string {
+    return this.personality;
+  }
+
+  /** Returns true on success. "nice" is always accepted (the neutral
+   *  baseline that omits any overlay). Any other name must exist in the
+   *  loaded personalities map. */
+  setPersonality(name: string): boolean {
+    if (name === "nice") {
+      this.personality = "nice";
+      return true;
+    }
+    if (!this.personalities.has(name)) return false;
+    this.personality = name;
+    return true;
+  }
+
+  /** Builds the ordered list of system text blocks for the next ask.
+   *  blocks[0] = active mode prompt
+   *  blocks[1] = personality overlay (omitted when personality === "nice")
+   *  blocks[N] = learner profile (when present)
+   */
+  private buildSystemBlocks(): string[] {
+    const blocks: string[] = [this.systemPrompt];
+    if (this.personality !== "nice") {
+      const overlay = this.personalities.get(this.personality);
+      if (overlay) blocks.push(overlay);
+    }
+    const profile = this.memory.getSummary();
+    if (profile) {
+      blocks.push(`What I've noticed about this developer over time:\n${profile}`);
+    }
+    return blocks;
   }
 
   getMemory(): MemoryStore {
@@ -125,10 +164,9 @@ export class Session {
       recent_chat,
     };
     const reply = await this.client.ask(
-      this.systemPrompt,
+      this.buildSystemBlocks(),
       this.summary,
-      enriched,
-      this.memory.getSummary()
+      enriched
     );
 
     if (reply.mode === "speak") {

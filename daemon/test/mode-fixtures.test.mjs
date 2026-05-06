@@ -65,7 +65,7 @@ for (const mode of MODES) {
     const payload = fixturePayload(mode);
     const sessionSummary = "(no summary yet)";
 
-    await client.ask(modePrompt(mode), sessionSummary, payload, "");
+    await client.ask([modePrompt(mode)], sessionSummary, payload);
 
     assert.equal(captured.length, 1);
     const req = captured[0];
@@ -100,17 +100,23 @@ for (const mode of MODES) {
   });
 }
 
-test("6.2 learner profile (when present) becomes a second system block, also cached", async () => {
+test("6.2 each block in systemBlocks becomes its own ephemerally-cached system entry", async () => {
+  // Session is the layer that decides what goes into systemBlocks
+  // (mode prompt, optional personality overlay, optional learner profile);
+  // AnthropicClient.ask just maps each block to a cached text entry.
+  // This test pins the per-block caching contract.
   const { client, captured } = buildClientWithStub();
   const payload = fixturePayload("tutor");
 
-  await client.ask(modePrompt("tutor"), "", payload, "Recurring: forgets await.");
+  const learnerBlock =
+    "What I've noticed about this developer over time:\nRecurring: forgets await.";
+  await client.ask([modePrompt("tutor"), learnerBlock], "", payload);
 
   const req = captured[0];
   assert.equal(req.system.length, 2);
   assert.equal(req.system[0].text, modePrompt("tutor"));
-  assert.match(req.system[1].text, /What I've noticed about this developer over time:/);
-  assert.match(req.system[1].text, /Recurring: forgets await\./);
+  assert.equal(req.system[1].text, learnerBlock);
+  assert.deepEqual(req.system[0].cache_control, { type: "ephemeral" });
   assert.deepEqual(req.system[1].cache_control, { type: "ephemeral" });
 });
 

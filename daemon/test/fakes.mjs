@@ -51,8 +51,16 @@ export class FakeAnthropicClient {
     return this._decisions.shift();
   }
 
-  async ask(systemPrompt, sessionSummary, triggerPayload, learnerProfile = "") {
-    this.calls.ask.push({ systemPrompt, sessionSummary, triggerPayload, learnerProfile });
+  async ask(systemBlocks, sessionSummary, triggerPayload) {
+    // Back-compat: existing tests inspect `systemPrompt` (the first block,
+    // which is always the active mode prompt). New tests should use
+    // `systemBlocks`.
+    this.calls.ask.push({
+      systemBlocks: [...systemBlocks],
+      systemPrompt: systemBlocks[0] ?? "",
+      sessionSummary,
+      triggerPayload,
+    });
     this._recordUsage("ask", "claude-sonnet-4-6");
     if (this._replies.length === 0) return { ...this._defaultReply };
     return { ...this._replies.shift() };

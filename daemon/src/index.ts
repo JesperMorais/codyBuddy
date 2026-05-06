@@ -85,7 +85,12 @@ const screenpipe = screenpipeUrl
 if (screenpipe) {
   console.log(`[buddy-daemon] Screenpipe enabled at ${screenpipeUrl}`);
 }
-const session = new Session(client, prompts, { screenpipe, personalities });
+const defaultPersonality = process.env.BUDDY_PERSONALITY ?? "nice";
+const session = new Session(client, prompts, {
+  screenpipe,
+  personalities,
+  defaultPersonality,
+});
 const tts = new TtsBridge({
   backend: ttsBackend,
   piperExe,

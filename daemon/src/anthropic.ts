@@ -26,11 +26,20 @@ export interface AiClient {
    * Sonnet round-trip).
    */
   shouldSpeak(triggerPayload: object, sessionSummary: string): Promise<SpeakDecision>;
+  /**
+   * `systemBlocks` is an ordered list of text blocks. Each block is sent
+   * to the model as its own ephemerally-cached system entry, in order:
+   *   - blocks[0] is always the active mode prompt
+   *   - blocks[1..] may include a personality overlay and/or a learner
+   *     profile block, depending on Session state
+   * Concrete clients map each block 1:1 to whatever their provider's
+   * native shape is (Anthropic: separate cache blocks; Ollama: one
+   * concatenated system message).
+   */
   ask(
-    systemPrompt: string,
+    systemBlocks: string[],
     sessionSummary: string,
-    triggerPayload: object,
-    learnerProfile?: string
+    triggerPayload: object
   ): Promise<BuddyReply>;
   summarize(transcript: string): Promise<string>;
   distillLearnerProfile(
@@ -52,30 +61,22 @@ export class AnthropicClient implements AiClient {
   }
 
   async ask(
-    systemPrompt: string,
+    systemBlocks: string[],
     sessionSummary: string,
-    triggerPayload: object,
-    learnerProfile: string = ""
+    triggerPayload: object
   ): Promise<BuddyReply> {
-    const systemBlocks: Array<{
-      type: "text";
-      text: string;
-      cache_control?: { type: "ephemeral" };
-    }> = [
-      { type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } },
-    ];
-    if (learnerProfile) {
-      systemBlocks.push({
-        type: "text",
-        text: `What I've noticed about this developer over time:\n${learnerProfile}`,
-        cache_control: { type: "ephemeral" },
-      });
-    }
+    const blocks = systemBlocks
+      .filter((b) => b && b.length > 0)
+      .map((text) => ({
+        type: "text" as const,
+        text,
+        cache_control: { type: "ephemeral" as const },
+      }));
 
     const stream = this.client.messages.stream({
       model: this.model,
       max_tokens: 400,
-      system: systemBlocks,
+      system: blocks,
       messages: [
         {
           role: "user",
