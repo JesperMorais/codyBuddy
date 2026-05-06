@@ -1,5 +1,6 @@
 {
   "voice_engine": "kokoro",
+  "kokoro_voice": "am_adam",
   "rate": 0.9,
   "energy": 1.0,
   "pause_factor": 1.25

@@ -1,5 +1,6 @@
 {
   "voice_engine": "kokoro",
+  "kokoro_voice": "af_sarah",
   "rate": 0.95,
   "energy": 0.8,
   "pause_factor": 1.2

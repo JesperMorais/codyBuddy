@@ -36,8 +36,26 @@ export class TtsBridge {
   /** AbortController for the in-flight Kokoro fetch. Same role as
    *  activeProc, for the HTTP path. */
   private activeAbort?: AbortController;
+  /** Active Kokoro voice id (Task 12.2). Set by the server whenever
+   *  setPersonality succeeds, looked up from each personality's
+   *  kokoro_voice config. Undefined = let the sidecar pick its
+   *  own default. */
+  private kokoroVoice?: string;
 
   constructor(private cfg: TtsConfig) {}
+
+  /** Update the Kokoro voice for subsequent synth calls. The next
+   *  speak() will include it in the request body; in-flight requests
+   *  are not retroactively retargeted. Empty / undefined clears the
+   *  override (sidecar default voice). */
+  setKokoroVoice(voice?: string): void {
+    this.kokoroVoice = voice && voice.length > 0 ? voice : undefined;
+  }
+
+  /** Read the active Kokoro voice. Mostly for tests / introspection. */
+  getKokoroVoice(): string | undefined {
+    return this.kokoroVoice;
+  }
 
   isActive(): boolean {
     return this.cfg.backend !== "none";
@@ -162,11 +180,13 @@ export class TtsBridge {
     const fetchFn = this.cfg.fetchImpl ?? fetch;
     const abort = new AbortController();
     this.activeAbort = abort;
+    const body: { text: string; voice?: string } = { text };
+    if (this.kokoroVoice) body.voice = this.kokoroVoice;
     try {
       const res = await fetchFn(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify(body),
         signal: abort.signal,
       });
       if (!res.ok) {

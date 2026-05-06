@@ -1,5 +1,6 @@
 {
   "voice_engine": "kokoro",
+  "kokoro_voice": "am_michael",
   "rate": 1.0,
   "energy": 1.15,
   "pause_factor": 1.0
