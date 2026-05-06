@@ -79,7 +79,7 @@ Personality is a tone overlay orthogonal to mode (global, not per-mode). Mode pr
   - Switching personality mid-session does not corrupt `recent_chat` or memory.
   - Random mode produces a different personality across N=10 triggers (seeded RNG).
 - [x] **9.8** Sidebar UI: add a personality dropdown next to the existing mode picker plus a "shuffle" checkbox for random mode. Persist to workspace state. Wire to the new WS messages. Minimal styling.
-- [ ] **9.9** Uncensored path via Ollama (depends on 7.2): when `BUDDY_PROVIDER=ollama`, allow an `nsfw` personality file to load (gated behind the local provider). On `BUDDY_PROVIDER=anthropic`, `setPersonality("nsfw")` returns `false` with a clear error. Test: provider switch correctly enables/disables the personality.
+- [x] **9.9** Uncensored path via Ollama (depends on 7.2): when `BUDDY_PROVIDER=ollama`, allow an `nsfw` personality file to load (gated behind the local provider). On `BUDDY_PROVIDER=anthropic`, `setPersonality("nsfw")` returns `false` with a clear error. Test: provider switch correctly enables/disables the personality.
 - [ ] **9.10** README + `.env.example`: document `BUDDY_PERSONALITY`, list shipped personalities, document the shuffle toggle, and explicitly note that `nsfw` requires `BUDDY_PROVIDER=ollama` and is unavailable on Anthropic.
 
 ---

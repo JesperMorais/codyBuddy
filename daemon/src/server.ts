@@ -12,16 +12,26 @@ export interface ServerDeps {
   recorder: Recorder;
   port: number;
   votes?: VoteStore;
+  /**
+   * Personality names that exist on disk but are deliberately not
+   * loaded for this provider, mapped to a human-readable reason.
+   * The setPersonality WS handler surfaces these via the modeSet
+   * ack so the sidebar can explain *why* a switch was refused
+   * (e.g. nsfw on the Anthropic provider).
+   */
+  gatedPersonalities?: Map<string, string>;
 }
 
 export function startServer(deps: ServerDeps): WebSocketServer {
   const { session, tts, stt, recorder, port, votes } = deps;
+  const gated = deps.gatedPersonalities ?? new Map<string, string>();
   const wss = new WebSocketServer({ host: "127.0.0.1", port });
 
   // The modeSet ack carries every personality-axis dimension (mode,
   // personality, shuffle) so the sidebar updates them in one round-trip
-  // whether the user changed any of them or just connected.
-  const modeAck = (ok: boolean): string =>
+  // whether the user changed any of them or just connected. `reason`
+  // rides along on rejections so the user sees *why* a switch failed.
+  const modeAck = (ok: boolean, reason?: string): string =>
     JSON.stringify({
       type: "modeSet",
       ok,
@@ -30,6 +40,7 @@ export function startServer(deps: ServerDeps): WebSocketServer {
       personality: session.getPersonality(),
       availablePersonalities: session.listPersonalities(),
       shuffle: session.isShuffle(),
+      ...(reason ? { reason } : {}),
     });
 
   wss.on("connection", (ws: WebSocket) => {
@@ -182,7 +193,14 @@ export function startServer(deps: ServerDeps): WebSocketServer {
           case "setPersonality": {
             const target = String((msg as { personality?: string }).personality ?? "");
             const ok = session.setPersonality(target);
-            ws.send(modeAck(ok));
+            let reason: string | undefined;
+            if (!ok) {
+              reason =
+                gated.get(target) ??
+                `unknown personality '${target}' (available: ${session.listPersonalities().join(", ") || "none"})`;
+              console.warn(`[server] setPersonality rejected: ${reason}`);
+            }
+            ws.send(modeAck(ok, reason));
             break;
           }
           case "getPersonality":

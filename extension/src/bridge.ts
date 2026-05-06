@@ -20,6 +20,7 @@ type ModeHandler = (info: {
   availablePersonalities: string[];
   shuffle: boolean;
   ok: boolean;
+  reason?: string;
 }) => void;
 type ReportHandler = (info: { summary: string; refreshed?: boolean }) => void;
 type AudioOwnerHandler = (info: { owner: "daemon" | "webview"; backend: string }) => void;
@@ -207,6 +208,7 @@ export class DaemonBridge {
               : [],
             shuffle: !!msg.shuffle,
             ok: !!msg.ok,
+            reason: typeof msg.reason === "string" ? msg.reason : undefined,
           });
         } else if (msg.type === "report" && this.reportHandler) {
           this.reportHandler({

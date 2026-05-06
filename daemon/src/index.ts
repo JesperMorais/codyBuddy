@@ -1,6 +1,5 @@
 import "dotenv/config";
-import { readdirSync, readFileSync } from "node:fs";
-import { resolve, dirname, basename } from "node:path";
+import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { AnthropicClient } from "./anthropic.js";
 import { OllamaClient, DEFAULT_OLLAMA_MODEL } from "./ollama.js";
@@ -13,6 +12,7 @@ import { parseTtsBackend } from "./config.js";
 import { startServer } from "./server.js";
 import { HttpScreenpipeClient } from "./screenpipe.js";
 import { VoteStore } from "./votes.js";
+import { loadPromptDir, loadPersonalities } from "./personalities-loader.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -45,27 +45,21 @@ const whisperExe = process.env.BUDDY_WHISPER_EXE;
 const whisperModel = process.env.BUDDY_WHISPER_MODEL;
 const model = process.env.BUDDY_MODEL ?? "claude-sonnet-4-6";
 
-function loadPromptDir(dir: string): Map<string, string> {
-  const map = new Map<string, string>();
-  for (const f of readdirSync(dir)) {
-    if (!f.endsWith(".md")) continue;
-    const name = basename(f, ".md");
-    map.set(name, readFileSync(resolve(dir, f), "utf8"));
-  }
-  return map;
-}
-
 const promptsDir = resolve(__dirname, "../prompts");
 const prompts = loadPromptDir(promptsDir);
 console.log(`[buddy-daemon] loaded modes: ${[...prompts.keys()].join(", ")}`);
 
-const personalitiesDir = resolve(promptsDir, "personalities");
-let personalities = new Map<string, string>();
-try {
-  personalities = loadPromptDir(personalitiesDir);
-  console.log(`[buddy-daemon] loaded personalities: ${[...personalities.keys()].join(", ")}`);
-} catch (err) {
-  console.warn(`[buddy-daemon] no personalities dir at ${personalitiesDir}`, err);
+const { personalities, gated: gatedPersonalities } = loadPersonalities(
+  promptsDir,
+  provider
+);
+console.log(
+  `[buddy-daemon] loaded personalities: ${[...personalities.keys()].join(", ") || "(none)"}`
+);
+if (gatedPersonalities.size > 0) {
+  console.log(
+    `[buddy-daemon] gated personalities (provider=${provider}): ${[...gatedPersonalities.keys()].join(", ")}`
+  );
 }
 
 let client: AiClient;
@@ -108,7 +102,15 @@ const stt = new SttBridge({ exe: whisperExe, model: whisperModel });
 const recorder = new Recorder();
 
 const votes = new VoteStore();
-const wss = startServer({ session, tts, stt, recorder, port, votes });
+const wss = startServer({
+  session,
+  tts,
+  stt,
+  recorder,
+  port,
+  votes,
+  gatedPersonalities,
+});
 console.log(
   `[buddy-daemon] listening on ws://127.0.0.1:${port} (model=${model}, tts=${tts.describe()}, stt=${stt.describe()})`
 );
