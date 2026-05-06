@@ -1,5 +1,6 @@
 {
   "voice_engine": "kokoro",
+  "kokoro_voice": "af_bella",
   "rate": 1.0,
   "energy": 1.0,
   "pause_factor": 1.0

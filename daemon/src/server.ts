@@ -20,11 +20,27 @@ export interface ServerDeps {
    * (e.g. nsfw on the Anthropic provider).
    */
   gatedPersonalities?: Map<string, string>;
+  /**
+   * Optional `personality name → kokoro voice id` lookup (Task 12.2).
+   * On a successful setPersonality, the server pushes the configured
+   * voice into TtsBridge so subsequent synth calls go to that voice.
+   * Personalities absent from this map fall back to the bridge's
+   * sidecar default. Wired by index.ts from the loaded personality
+   * configs.
+   */
+  kokoroVoiceFor?: Map<string, string>;
 }
 
 export function startServer(deps: ServerDeps): WebSocketServer {
   const { session, tts, stt, recorder, port, votes } = deps;
   const gated = deps.gatedPersonalities ?? new Map<string, string>();
+  const kokoroVoiceFor = deps.kokoroVoiceFor ?? new Map<string, string>();
+  // Apply the initial personality's Kokoro voice immediately so the
+  // first synth call after boot already uses the right voice — without
+  // this the bridge would fall back to its sidecar default until the
+  // user (re-)selected a personality.
+  const initialVoice = kokoroVoiceFor.get(session.getPersonality());
+  if (initialVoice) tts.setKokoroVoice(initialVoice);
   const wss = new WebSocketServer({ host: "127.0.0.1", port });
 
   // The modeSet ack carries every personality-axis dimension (mode,
@@ -219,6 +235,14 @@ export function startServer(deps: ServerDeps): WebSocketServer {
                 gated.get(target) ??
                 `unknown personality '${target}' (available: ${session.listPersonalities().join(", ") || "none"})`;
               console.warn(`[server] setPersonality rejected: ${reason}`);
+            } else {
+              // Task 12.2: apply the personality's configured Kokoro voice
+              // to the bridge immediately. Personalities without a config
+              // entry leave the previous voice in place — the bridge
+              // already fell back to the sidecar default before the
+              // user changed personality.
+              const voice = kokoroVoiceFor.get(target);
+              if (voice) tts.setKokoroVoice(voice);
             }
             ws.send(modeAck(ok, reason));
             break;

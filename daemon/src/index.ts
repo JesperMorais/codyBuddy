@@ -13,6 +13,8 @@ import { startServer } from "./server.js";
 import { HttpScreenpipeClient } from "./screenpipe.js";
 import { VoteStore } from "./votes.js";
 import { loadPromptDir, loadPersonalities } from "./personalities-loader.js";
+import { loadPersonalityConfigs } from "./personality-config.js";
+import { join } from "node:path";
 import { existsSync } from "node:fs";
 import { findVoiceDir, spawnVoiceSidecar } from "./voice-sidecar.js";
 
@@ -64,6 +66,33 @@ if (gatedPersonalities.size > 0) {
   );
 }
 
+// Task 12.2: load each loaded personality's voice config to build a
+// `name → kokoro_voice` lookup the server uses to retarget the TTS
+// bridge on setPersonality. A bad config is fatal (the live audio
+// path can't silently degrade); a missing config for a given
+// personality leaves it unmapped and the bridge falls back to its
+// sidecar default. We only require configs for personalities the
+// daemon will actually accept (i.e. the loaded ones — gated names
+// don't need a voice mapping).
+const personalitiesDir = join(promptsDir, "personalities");
+const personalityConfigs = loadPersonalityConfigs(
+  personalitiesDir,
+  personalities.keys()
+);
+const kokoroVoiceFor = new Map<string, string>();
+for (const [name, cfg] of personalityConfigs) {
+  if (cfg.voice_engine === "kokoro" && cfg.kokoro_voice) {
+    kokoroVoiceFor.set(name, cfg.kokoro_voice);
+  }
+}
+if (kokoroVoiceFor.size > 0) {
+  console.log(
+    `[buddy-daemon] kokoro voices: ${[...kokoroVoiceFor.entries()]
+      .map(([k, v]) => `${k}=${v}`)
+      .join(", ")}`
+  );
+}
+
 let client: AiClient;
 if (provider === "ollama") {
   const ollamaUrl = process.env.BUDDY_OLLAMA_URL ?? "http://localhost:11434/v1";
@@ -112,6 +141,7 @@ const wss = startServer({
   port,
   votes,
   gatedPersonalities,
+  kokoroVoiceFor,
 });
 console.log(
   `[buddy-daemon] listening on ws://127.0.0.1:${port} (model=${model}, tts=${tts.describe()}, stt=${stt.describe()})`
