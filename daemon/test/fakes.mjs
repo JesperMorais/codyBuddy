@@ -19,6 +19,8 @@ export class FakeAnthropicClient {
     summary = "(fake summary)",
     profile = "(fake profile)",
     defaultDecision = "speak",
+    telemetry,
+    fakeUsage = { input_tokens: 100, output_tokens: 50 },
   } = {}) {
     this._replies = [...replies];
     this._decisions = [...decisions];
@@ -26,6 +28,8 @@ export class FakeAnthropicClient {
     this._defaultDecision = defaultDecision;
     this._summary = summary;
     this._profile = profile;
+    this._telemetry = telemetry;
+    this._fakeUsage = fakeUsage;
     this.calls = {
       ask: [],
       shouldSpeak: [],
@@ -34,25 +38,35 @@ export class FakeAnthropicClient {
     };
   }
 
+  _recordUsage(method, model) {
+    if (this._telemetry) {
+      this._telemetry.record(method, model, this._fakeUsage);
+    }
+  }
+
   async shouldSpeak(triggerPayload, sessionSummary) {
     this.calls.shouldSpeak.push({ triggerPayload, sessionSummary });
+    this._recordUsage("shouldSpeak", "claude-haiku-4-5-20251001");
     if (this._decisions.length === 0) return this._defaultDecision;
     return this._decisions.shift();
   }
 
   async ask(systemPrompt, sessionSummary, triggerPayload, learnerProfile = "") {
     this.calls.ask.push({ systemPrompt, sessionSummary, triggerPayload, learnerProfile });
+    this._recordUsage("ask", "claude-sonnet-4-6");
     if (this._replies.length === 0) return { ...this._defaultReply };
     return { ...this._replies.shift() };
   }
 
   async summarize(transcript) {
     this.calls.summarize.push(transcript);
+    this._recordUsage("summarize", "claude-haiku-4-5-20251001");
     return this._summary;
   }
 
   async distillLearnerProfile(history, priorProfile) {
     this.calls.distillLearnerProfile.push({ history, priorProfile });
+    this._recordUsage("distillLearnerProfile", "claude-haiku-4-5-20251001");
     return this._profile;
   }
 }
