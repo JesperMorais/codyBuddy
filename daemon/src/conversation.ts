@@ -40,6 +40,7 @@
 
 import { EventEmitter } from "node:events";
 import type { BargeInController } from "./barge-in.js";
+import { SentenceBuffer } from "./sentence-buffer.js";
 
 export type ConversationState =
   | "IDLE"
@@ -234,8 +235,7 @@ export class ConversationLoop {
     const settle = (async () => {
       try {
         let firstToken = true;
-        let buffer = "";
-        const sentenceEnd = /([.!?]|\n\n)/;
+        const sentenceBuf = new SentenceBuffer();
         try {
           for await (const chunk of this.deps.completeUtterance(opp.payload, abort.signal)) {
             if (abort.signal.aborted) break;
@@ -243,21 +243,17 @@ export class ConversationLoop {
               firstToken = false;
               this.transition("SPEAKING");
             }
-            buffer += chunk;
-            // Emit each completed sentence as soon as we see a
-            // boundary, so playback can start before the LLM stream
-            // is done.
-            let m: RegExpExecArray | null;
-            while ((m = sentenceEnd.exec(buffer))) {
-              const end = m.index + m[0].length;
-              const sentence = buffer.slice(0, end).trim();
-              buffer = buffer.slice(end);
-              if (sentence) await this.deps.speakSentence(sentence);
+            // Emit each completed sentence as soon as the buffer
+            // surfaces one, so playback can start before the LLM
+            // stream is done.
+            for (const sentence of sentenceBuf.push(chunk)) {
+              if (abort.signal.aborted) break;
+              await this.deps.speakSentence(sentence);
             }
           }
           // Flush any trailing fragment as a final sentence.
           if (!abort.signal.aborted) {
-            const tail = buffer.trim();
+            const tail = sentenceBuf.flush();
             if (tail) await this.deps.speakSentence(tail);
           }
         } catch (err) {
