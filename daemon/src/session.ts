@@ -41,10 +41,25 @@ export class Session {
     this.memory = opts.memory ?? new MemoryStore();
     this.screenpipe = opts.screenpipe;
     this.personalities = opts.personalities ?? new Map();
-    // Default to "nice" — the neutral baseline. "nice" is always
-    // accepted, even if it isn't in the personalities map (the overlay
-    // is simply omitted in that case).
-    this.personality = opts.defaultPersonality ?? "nice";
+    // Personality precedence (highest first):
+    //   1. persisted value from prior session, if still valid
+    //   2. opts.defaultPersonality (typically BUDDY_PERSONALITY env)
+    //   3. "nice" — the neutral baseline that always works
+    // "nice" is always accepted even if it isn't in the personalities
+    // map (the overlay is simply omitted in that case). An invalid
+    // persisted value is silently ignored so a removed personality
+    // file doesn't wedge the daemon.
+    const persisted = this.memory.getPersonality();
+    const fallback = opts.defaultPersonality ?? "nice";
+    const valid = (name: string): boolean =>
+      name === "nice" || this.personalities.has(name);
+    if (persisted && valid(persisted)) {
+      this.personality = persisted;
+    } else if (valid(fallback)) {
+      this.personality = fallback;
+    } else {
+      this.personality = "nice";
+    }
     if (!this.prompts.has(this.mode)) {
       throw new Error(`No prompt loaded for default mode "${this.mode}"`);
     }
@@ -63,14 +78,17 @@ export class Session {
 
   /** Returns true on success. "nice" is always accepted (the neutral
    *  baseline that omits any overlay). Any other name must exist in the
-   *  loaded personalities map. */
+   *  loaded personalities map. The choice is persisted on success so a
+   *  daemon restart restores it. */
   setPersonality(name: string): boolean {
     if (name === "nice") {
       this.personality = "nice";
+      this.memory.setPersonality("nice");
       return true;
     }
     if (!this.personalities.has(name)) return false;
     this.personality = name;
+    this.memory.setPersonality(name);
     return true;
   }
 

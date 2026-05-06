@@ -26,6 +26,7 @@ export class MemoryStore {
   private summaryPath: string;
   private mutePath: string;
   private misconceptionsPath: string;
+  private personalityPath: string;
   private cachedSummary = "";
   private eventsSinceSummary = 0;
 
@@ -35,6 +36,7 @@ export class MemoryStore {
     this.summaryPath = join(dir, "memory.summary.md");
     this.mutePath = join(dir, "mute.json");
     this.misconceptionsPath = join(dir, "misconceptions.json");
+    this.personalityPath = join(dir, "personality.json");
     mkdirSync(this.dir, { recursive: true });
     if (existsSync(this.summaryPath)) {
       this.cachedSummary = readFileSync(this.summaryPath, "utf8");
@@ -147,12 +149,42 @@ export class MemoryStore {
     }
   }
 
+  /**
+   * Returns the persisted personality name, or null if nothing was ever
+   * written. Unlike mute, there is no notion of "stale" — a chosen
+   * personality should ride across daemon restarts indefinitely.
+   * Validation against the actual loaded personalities map is the
+   * caller's responsibility (Session does this in its constructor).
+   */
+  getPersonality(): string | null {
+    if (!existsSync(this.personalityPath)) return null;
+    try {
+      const raw = readFileSync(this.personalityPath, "utf8");
+      const parsed = JSON.parse(raw) as { personality?: unknown };
+      const value = parsed.personality;
+      return typeof value === "string" && value.length > 0 ? value : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Persists the chosen personality. Best-effort — disk failures are
+   *  swallowed so the in-memory choice is unaffected. */
+  setPersonality(name: string): void {
+    try {
+      writeFileSync(this.personalityPath, JSON.stringify({ personality: name }), "utf8");
+    } catch {
+      // best effort
+    }
+  }
+
   paths(): {
     dir: string;
     log: string;
     summary: string;
     mute: string;
     misconceptions: string;
+    personality: string;
   } {
     return {
       dir: this.dir,
@@ -160,6 +192,7 @@ export class MemoryStore {
       summary: this.summaryPath,
       mute: this.mutePath,
       misconceptions: this.misconceptionsPath,
+      personality: this.personalityPath,
     };
   }
 }
