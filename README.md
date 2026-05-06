@@ -78,6 +78,39 @@ End any line with one of these and save the file — buddy will respond:
 
 The trigger comment is recognized by suffix; the rest of the line is sent as your question.
 
+## Personalities
+
+A personality is a *tone overlay* layered on top of the active mode prompt. Mode (`tutor` / `architect` / `explainer` / `reviewer`) governs *what* the buddy says; personality governs *how*. The same misconception explanation comes out as a clipped imperative under `drill_sergeant` or as a deadpan one-liner under `dry` — but the underlying judgement is identical.
+
+**Shipped overlays** (load on every provider):
+
+| Name | Vibe |
+|---|---|
+| `nice` | Neutral baseline. The overlay block is omitted entirely — pure mode prompt. Default. |
+| `dry` | Deadpan, terse, lightly sardonic. |
+| `rude` | Blunt. No corporate softeners. |
+| `drill_sergeant` | Clipped, imperative, high-tempo. |
+| `passive_aggressive` | Polite on the surface, pointed underneath. |
+| `pirate` | Full pirate cadence. |
+| `shakespearean` | Early-modern English. |
+
+**Gated overlay** (Ollama-only):
+
+| Name | Why gated |
+|---|---|
+| `nsfw` | Uncensored register: profanity for emphasis, edgier similes, no platform-side moderation. **Requires `BUDDY_PROVIDER=ollama`** because hosted Anthropic models will refuse most of what this overlay asks for. On `BUDDY_PROVIDER=anthropic`, `setPersonality("nsfw")` returns `false` and the sidebar shows `Could not switch: personality 'nsfw' requires BUDDY_PROVIDER=ollama (current provider does not support uncensored output)`. |
+
+**How to pick one:**
+
+- `BUDDY_PERSONALITY=<name>` in `.env` seeds the *first* boot.
+- The sidebar dropdown switches at runtime (next to the mode dropdown, above the message log).
+- The choice is persisted to `~/.coding-buddy/personality.json` and survives daemon restarts — the env var only matters when nothing has been persisted yet.
+
+**Shuffle mode:**
+
+- `BUDDY_PERSONALITY=random` (or the sidebar **Shuffle** checkbox) rotates the overlay on every trigger, never repeating the previous one. Off by default.
+- The shuffle toggle is independent of the seed personality and persists separately to `~/.coding-buddy/shuffle.json`.
+
 ## Sidebar votes
 
 After each non-`no_op` reply, 👍 / 👎 buttons appear under the message. Clicks are persisted to `~/.coding-buddy/votes.jsonl`. To see per-trigger up/down rates and suggested threshold deltas:
@@ -97,7 +130,7 @@ node scripts/tune-triggers.mjs --min 10     # ignore triggers with < 10 votes
 | `BUDDY_OLLAMA_URL` | `http://localhost:11434/v1` | OpenAI-compatible endpoint when `BUDDY_PROVIDER=ollama`. |
 | `BUDDY_OLLAMA_MODEL` | `qwen2.5-coder:32b` | Local model name. |
 | `BUDDY_DAEMON_PORT` | `31415` | Loopback WS port the daemon listens on. |
-| `BUDDY_PERSONALITY` | `nice` | Tone overlay applied on top of the active mode prompt. Other shipped values: `dry`, `rude`, `drill_sergeant`, `passive_aggressive`, `pirate`, `shakespearean`. |
+| `BUDDY_PERSONALITY` | `nice` | Tone overlay on top of the active mode prompt. See [Personalities](#personalities) for the full list, the `random` shuffle mode, and the Ollama-only `nsfw` overlay. |
 | `BUDDY_TTS_BACKEND` | `none` | `none` / `piper` / `kokoro`. Daemon refuses to start on anything else. |
 | `BUDDY_PIPER_EXE` / `BUDDY_PIPER_VOICE` | — | Piper executable + voice file when `BUDDY_TTS_BACKEND=piper`. |
 | `BUDDY_KOKORO_URL` | `http://127.0.0.1:31416/tts` | Kokoro FastAPI sidecar when `BUDDY_TTS_BACKEND=kokoro`. |
