@@ -5,6 +5,7 @@ import type { SttBridge } from "./stt.js";
 import type { Recorder } from "./recorder.js";
 import type { VoteStore } from "./votes.js";
 import type { PersonalityConfig } from "./personality-config.js";
+import type { RollingCostRate } from "./cost-rate.js";
 
 export interface ServerDeps {
   session: Session;
@@ -39,6 +40,13 @@ export interface ServerDeps {
    * configured backend.
    */
   personalityVoiceConfigs?: Map<string, PersonalityConfig>;
+  /**
+   * Optional rolling-cost-rate observer (Task 13.3). When wired,
+   * the WS handler responds to `{type: "getCostRate"}` with a
+   * snapshot for the sidebar's $/hr counter. Absent → handler
+   * replies with zeros.
+   */
+  costRate?: RollingCostRate;
 }
 
 export function startServer(deps: ServerDeps): WebSocketServer {
@@ -285,6 +293,25 @@ export function startServer(deps: ServerDeps): WebSocketServer {
             const summary = await session.forceDistillProfile();
             const paths = session.getMemory().paths();
             ws.send(JSON.stringify({ type: "report", summary, paths, refreshed: true }));
+            break;
+          }
+          case "getCostRate": {
+            // Task 13.3: live $/hr counter for the sidebar pill.
+            // The sidebar polls this on a timer (5-10s cadence is
+            // plenty); when no costRate observer is wired the
+            // server replies with zeros so the sidebar can render
+            // a stable "—" or "$0.00/hr" placeholder.
+            const snap = deps.costRate?.snapshot();
+            ws.send(
+              JSON.stringify({
+                type: "costRate",
+                spent_usd: snap?.spentUsd ?? 0,
+                rate_per_hour_usd: snap?.ratePerHourUsd ?? 0,
+                window_ms: snap?.windowMs ?? 0,
+                turns_in_window: snap?.turnsInWindow ?? 0,
+                computed_at: snap?.computedAt ?? Date.now(),
+              })
+            );
             break;
           }
           default:
