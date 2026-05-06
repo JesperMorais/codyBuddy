@@ -133,6 +133,13 @@ export class Session {
       });
     }
 
+    if (trigger === "MISCONCEPTION") {
+      const reason = (payload as { reason?: string }).reason ?? "";
+      const pattern = reason.replace(/^anti-pattern:\s*/i, "").trim() || "unknown";
+      const sample = JSON.stringify(payload).slice(0, 200);
+      this.memory.recordMisconception(pattern, sample);
+    }
+
     void this.maybeSummarize();
     void this.maybeDistillProfile();
     return reply;
@@ -160,7 +167,11 @@ export class Session {
       })
       .join("\n");
     try {
-      const next = await this.client.distillLearnerProfile(history, this.memory.getSummary());
+      const next = await this.client.distillLearnerProfile(
+        history,
+        this.memory.getSummary(),
+        this.memory.getMisconceptions()
+      );
       if (next) this.memory.setSummary(next);
     } catch (err) {
       console.error("[memory] distill failed", err);
