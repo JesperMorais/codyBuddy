@@ -5,6 +5,14 @@ export interface SidebarMessage {
   reply: { mode: string; text: string };
 }
 
+export interface SidebarControls {
+  mode: string;
+  available: string[];
+  personality: string;
+  availablePersonalities: string[];
+  shuffle: boolean;
+}
+
 export class BuddySidebarProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = "coding-buddy.sidebar";
 
@@ -13,8 +21,12 @@ export class BuddySidebarProvider implements vscode.WebviewViewProvider {
   private askInputHandler?: (text: string) => void;
   private micToggleHandler?: () => void;
   private voteHandler?: (trigger: string, replyText: string, vote: "up" | "down") => void;
+  private modeChangeHandler?: (mode: string) => void;
+  private personalityChangeHandler?: (personality: string) => void;
+  private shuffleChangeHandler?: (shuffle: boolean) => void;
   private voiceEnabled = true;
   private voiceRate = 1.05;
+  private lastControls?: SidebarControls;
 
   resolveWebviewView(view: vscode.WebviewView): void {
     this.view = view;
@@ -28,9 +40,18 @@ export class BuddySidebarProvider implements vscode.WebviewViewProvider {
       } else if (msg.type === "vote" && this.voteHandler) {
         const v = msg.vote === "down" ? "down" : "up";
         this.voteHandler(String(msg.trigger ?? ""), String(msg.reply_text ?? ""), v);
+      } else if (msg.type === "setMode" && this.modeChangeHandler) {
+        this.modeChangeHandler(String(msg.mode ?? ""));
+      } else if (msg.type === "setPersonality" && this.personalityChangeHandler) {
+        this.personalityChangeHandler(String(msg.personality ?? ""));
+      } else if (msg.type === "setShuffle" && this.shuffleChangeHandler) {
+        this.shuffleChangeHandler(!!msg.shuffle);
       }
     });
     this.view.webview.postMessage({ type: "voiceConfig", enabled: this.voiceEnabled, rate: this.voiceRate });
+    if (this.lastControls) {
+      this.view.webview.postMessage({ type: "controls", ...this.lastControls });
+    }
     while (this.pending.length) this.post(this.pending.shift()!);
   }
 
@@ -44,6 +65,31 @@ export class BuddySidebarProvider implements vscode.WebviewViewProvider {
 
   onVote(h: (trigger: string, replyText: string, vote: "up" | "down") => void): void {
     this.voteHandler = h;
+  }
+
+  onModeChange(h: (mode: string) => void): void {
+    this.modeChangeHandler = h;
+  }
+
+  onPersonalityChange(h: (personality: string) => void): void {
+    this.personalityChangeHandler = h;
+  }
+
+  onShuffleChange(h: (shuffle: boolean) => void): void {
+    this.shuffleChangeHandler = h;
+  }
+
+  /** Push the latest mode + personality + shuffle state into the webview
+   *  so the dropdowns and checkbox reflect the daemon's truth. The last
+   *  payload is cached so a webview that opens later can re-hydrate
+   *  without an extra round-trip. */
+  setControls(controls: SidebarControls): void {
+    this.lastControls = controls;
+    this.view?.webview.postMessage({ type: "controls", ...controls });
+  }
+
+  getControls(): SidebarControls | undefined {
+    return this.lastControls;
   }
 
   setVoice(enabled: boolean): void {
@@ -129,8 +175,20 @@ export class BuddySidebarProvider implements vscode.WebviewViewProvider {
   #mic.recording { background: var(--vscode-errorForeground); color: var(--vscode-button-foreground); animation: pulse 1.2s ease-in-out infinite; }
   @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.55; } }
   #voice-status { font-size: 10px; opacity: 0.5; margin-top: 4px; }
+  #controls { display: flex; gap: 6px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--vscode-input-border); margin-bottom: 6px; flex-wrap: wrap; }
+  #controls label { font-size: 11px; opacity: 0.75; }
+  #controls select { background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border); padding: 2px 4px; font-size: 12px; }
+  #controls .shuffle-row { display: flex; align-items: center; gap: 3px; font-size: 11px; }
+  #controls input[type=checkbox] { margin: 0; }
 </style></head>
 <body>
+  <div id="controls">
+    <label for="mode-select">Mode</label>
+    <select id="mode-select"></select>
+    <label for="personality-select">Personality</label>
+    <select id="personality-select"></select>
+    <label class="shuffle-row" for="shuffle"><input type="checkbox" id="shuffle"> Shuffle</label>
+  </div>
   <div id="log"></div>
   <div id="ask-row">
     <input id="ask" placeholder="Ask the buddy (Enter to send)..." />
@@ -253,6 +311,39 @@ export class BuddySidebarProvider implements vscode.WebviewViewProvider {
     vscode.postMessage({ type: 'micToggle' });
   });
 
+  const modeSelect = document.getElementById('mode-select');
+  const personalitySelect = document.getElementById('personality-select');
+  const shuffleCheckbox = document.getElementById('shuffle');
+
+  function fillSelect(select, options, current) {
+    if (!select) return;
+    // Avoid the brief flash of "no options" by only rebuilding when the
+    // option set actually changed; just re-pin the selected value when
+    // the list is identical.
+    const desired = options.join('\\n');
+    if (select.dataset.options !== desired) {
+      select.innerHTML = '';
+      for (const value of options) {
+        const opt = document.createElement('option');
+        opt.value = value;
+        opt.textContent = value;
+        select.appendChild(opt);
+      }
+      select.dataset.options = desired;
+    }
+    select.value = current;
+  }
+
+  modeSelect.addEventListener('change', () => {
+    vscode.postMessage({ type: 'setMode', mode: modeSelect.value });
+  });
+  personalitySelect.addEventListener('change', () => {
+    vscode.postMessage({ type: 'setPersonality', personality: personalitySelect.value });
+  });
+  shuffleCheckbox.addEventListener('change', () => {
+    vscode.postMessage({ type: 'setShuffle', shuffle: shuffleCheckbox.checked });
+  });
+
   ask.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && ask.value.trim()) {
       vscode.postMessage({ type: 'ask', text: ask.value });
@@ -314,6 +405,15 @@ export class BuddySidebarProvider implements vscode.WebviewViewProvider {
       pushStatus('Transcribing audio…');
     } else if (m.type === 'transcribed') {
       pushStatus('You: ' + m.text);
+    } else if (m.type === 'controls') {
+      fillSelect(modeSelect, m.available || [], m.mode || '');
+      // Personality picker always offers "nice" — it's the no-overlay
+      // baseline and may not appear in availablePersonalities if the
+      // daemon has no nice.md loaded.
+      const personalityOptions = (m.availablePersonalities || []).slice();
+      if (!personalityOptions.includes('nice')) personalityOptions.unshift('nice');
+      fillSelect(personalitySelect, personalityOptions, m.personality || 'nice');
+      shuffleCheckbox.checked = !!m.shuffle;
     } else if (m.type === 'testVoice') {
       const div = document.createElement('div');
       div.className = 'status';
