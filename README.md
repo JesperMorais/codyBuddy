@@ -137,6 +137,7 @@ node scripts/tune-triggers.mjs --min 10     # ignore triggers with < 10 votes
 | `BUDDY_KOKORO_URL` | `http://127.0.0.1:31416/tts` | Kokoro FastAPI sidecar when `BUDDY_TTS_BACKEND=kokoro`. |
 | `BUDDY_TTS_VOLUME` | `0.5` | 0.0–1.0. Applied by the Piper backend; Kokoro plays at sidecar default. |
 | `BUDDY_WHISPER_EXE` / `BUDDY_WHISPER_MODEL` | — | whisper.cpp paths for voice input (Ctrl+Alt+V). |
+| `BUDDY_BACKCHANNEL` | `on` | When the conversation loop is `LISTENING` and the user has been speaking >3s, plays a short `voice/backchannels/*.wav` clip (cooldown ≥8s). `off` disables. |
 | `BUDDY_SCREENPIPE_URL` | — (disabled) | When set, OCR'd recent screen activity is added to `EXPLICIT_ASK` triggers when `recent_diff` is empty. |
 
 VS Code settings (Settings → Coding Buddy):
