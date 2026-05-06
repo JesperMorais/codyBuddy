@@ -125,7 +125,7 @@ Personality stops being just-a-prompt and becomes voice + prosody + script. Both
 
 Always-on voice is unviable without aggressive quieting and budget caps.
 
-- [ ] **13.1** Auto-quiet detector: 5 min of no `speech.end` events AND no editor edits → drop the loop into `QUIET` (Haiku-tier polling only, mic still open but transcripts dropped unless wake word matches; if wake word is `off`, Haiku still gates by transcript length >N). Resume on first speech-end or first edit. Test: simulate 6 minutes of silence; assert no Sonnet calls fired and the loop transitioned to `QUIET`.
+- [x] **13.1** Auto-quiet detector: 5 min of no `speech.end` events AND no editor edits → drop the loop into `QUIET` (Haiku-tier polling only, mic still open but transcripts dropped unless wake word matches; if wake word is `off`, Haiku still gates by transcript length >N). Resume on first speech-end or first edit. Test: simulate 6 minutes of silence; assert no Sonnet calls fired and the loop transitioned to `QUIET`.
 - [ ] **13.2** Per-day USD cap: `BUDDY_DAILY_USD=5.00` (default). Tracked from telemetry (11.5). When hit, the loop downgrades to chat-only (TTS off, voice loop suspended) until midnight local. Sidebar shows the cap state. Test: with a low cap and stubbed token costs, assert downgrade after the threshold.
 - [ ] **13.3** Live $/hr counter in the sidebar pill. Rolling 10-min window from telemetry. Test: feed synthetic telemetry; assert the displayed rate matches.
 
