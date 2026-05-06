@@ -136,8 +136,24 @@ export class BuddySidebarProvider implements vscode.WebviewViewProvider {
     this.view?.webview.postMessage({ type: "transcribing" });
   }
 
+  /** Render a finalised user-side transcript as its own message
+   *  bubble in the live transcript view (Task 14.1). The webview
+   *  styles user turns gray so the transcript-vs-buddy distinction
+   *  is unambiguous.
+   *
+   *  Backchannels (Task 10.7) are intentionally NOT routed through
+   *  this method — they're pre-recorded acks the daemon plays
+   *  locally without text reaching the sidebar at all. Keep this
+   *  contract: only call notifyTranscribed for the user's actual
+   *  speech-to-text output, not low-level audio cues. */
   notifyTranscribed(text: string): void {
-    this.view?.webview.postMessage({ type: "transcribed", text });
+    if (!text) return;
+    this.view?.webview.postMessage({
+      type: "transcript",
+      speaker: "user",
+      text,
+      ts: Date.now(),
+    });
   }
 
   isReady(): boolean {
@@ -163,6 +179,14 @@ export class BuddySidebarProvider implements vscode.WebviewViewProvider {
   .text strong { font-weight: 600; }
   .speak { border-left: 3px solid var(--vscode-charts-green); }
   .chat { border-left: 3px solid var(--vscode-charts-blue); }
+  /* Task 14.1: live transcript view. User turns are gray; buddy
+     turns inherit the default bubble background (effectively
+     "white" against the editor's foreground color). The .speaker
+     micro-label sits above the text so screen readers announce
+     who's talking. */
+  .msg.user { background: var(--vscode-input-background); opacity: 0.9; border-left: 3px solid var(--vscode-descriptionForeground); }
+  .msg.user .text p { color: var(--vscode-descriptionForeground); }
+  .speaker { font-size: 10px; opacity: 0.65; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px; }
   .status { font-size: 11px; opacity: 0.6; font-style: italic; margin: 4px 0; }
   .votes { margin-top: 4px; display: flex; gap: 4px; }
   .vote-btn { background: transparent; border: 1px solid var(--vscode-input-border); color: inherit; cursor: pointer; padding: 1px 6px; border-radius: 3px; font-size: 12px; opacity: 0.6; }
@@ -403,8 +427,18 @@ export class BuddySidebarProvider implements vscode.WebviewViewProvider {
       if (m.recording) pushStatus('🔴 Listening… click mic again or press Ctrl+Alt+V to send.');
     } else if (m.type === 'transcribing') {
       pushStatus('Transcribing audio…');
-    } else if (m.type === 'transcribed') {
-      pushStatus('You: ' + m.text);
+    } else if (m.type === 'transcript') {
+      // Task 14.1: live transcript bubble. Stays scrolled to bottom.
+      // Backchannels never reach this branch — the daemon plays
+      // them as pre-recorded clips without surfacing any text.
+      const div = document.createElement('div');
+      const speaker = m.speaker === 'user' ? 'user' : 'buddy';
+      div.className = 'msg ' + speaker;
+      const label = speaker === 'user' ? 'You' : 'Buddy';
+      div.innerHTML = '<div class="speaker">' + label + '</div>'
+        + '<div class="text"><p>' + escapeHtml(m.text || '') + '</p></div>';
+      log.appendChild(div);
+      log.scrollTop = log.scrollHeight;
     } else if (m.type === 'controls') {
       fillSelect(modeSelect, m.available || [], m.mode || '');
       // Personality picker always offers "nice" — it's the no-overlay
