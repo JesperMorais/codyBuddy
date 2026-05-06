@@ -13,7 +13,13 @@ export interface OutputLike {
 }
 
 type ReplyHandler = (reply: BuddyReply, trigger: string) => void;
-type ModeHandler = (info: { mode: string; available: string[]; ok: boolean }) => void;
+type ModeHandler = (info: {
+  mode: string;
+  available: string[];
+  personality: string;
+  availablePersonalities: string[];
+  ok: boolean;
+}) => void;
 type ReportHandler = (info: { summary: string; refreshed?: boolean }) => void;
 type AudioOwnerHandler = (info: { owner: "daemon" | "webview"; backend: string }) => void;
 type TranscribedHandler = (info: { ok: boolean; text?: string; error?: string; requestId?: string }) => void;
@@ -51,6 +57,14 @@ export class DaemonBridge {
 
   setMode(mode: string): void {
     this.send({ type: "setMode", mode });
+  }
+
+  setPersonality(personality: string): void {
+    this.send({ type: "setPersonality", personality });
+  }
+
+  getPersonality(): void {
+    this.send({ type: "getPersonality" });
   }
 
   onReport(h: ReportHandler): void {
@@ -182,6 +196,10 @@ export class DaemonBridge {
           this.modeHandler({
             mode: String(msg.mode ?? "tutor"),
             available: Array.isArray(msg.available) ? (msg.available as string[]) : [],
+            personality: String(msg.personality ?? "nice"),
+            availablePersonalities: Array.isArray(msg.availablePersonalities)
+              ? (msg.availablePersonalities as string[])
+              : [],
             ok: !!msg.ok,
           });
         } else if (msg.type === "report" && this.reportHandler) {

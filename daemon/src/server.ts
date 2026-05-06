@@ -18,16 +18,22 @@ export function startServer(deps: ServerDeps): WebSocketServer {
   const { session, tts, stt, recorder, port, votes } = deps;
   const wss = new WebSocketServer({ host: "127.0.0.1", port });
 
+  // The modeSet ack carries both dimensions (mode + personality) so the
+  // sidebar updates them in one round-trip whether the user changed the
+  // mode, the personality, or just connected.
+  const modeAck = (ok: boolean): string =>
+    JSON.stringify({
+      type: "modeSet",
+      ok,
+      mode: session.getMode(),
+      available: session.listModes(),
+      personality: session.getPersonality(),
+      availablePersonalities: session.listPersonalities(),
+    });
+
   wss.on("connection", (ws: WebSocket) => {
     console.log("[buddy-daemon] extension connected");
-    ws.send(
-      JSON.stringify({
-        type: "modeSet",
-        ok: true,
-        mode: session.getMode(),
-        available: session.listModes(),
-      })
-    );
+    ws.send(modeAck(true));
     ws.send(
       JSON.stringify({
         type: "audioOwner",
@@ -166,25 +172,20 @@ export function startServer(deps: ServerDeps): WebSocketServer {
           case "setMode": {
             const target = String((msg as { mode?: string }).mode ?? "");
             const ok = session.setMode(target);
-            ws.send(
-              JSON.stringify({
-                type: "modeSet",
-                ok,
-                mode: session.getMode(),
-                available: session.listModes(),
-              })
-            );
+            ws.send(modeAck(ok));
             break;
           }
           case "getMode":
-            ws.send(
-              JSON.stringify({
-                type: "modeSet",
-                ok: true,
-                mode: session.getMode(),
-                available: session.listModes(),
-              })
-            );
+            ws.send(modeAck(true));
+            break;
+          case "setPersonality": {
+            const target = String((msg as { personality?: string }).personality ?? "");
+            const ok = session.setPersonality(target);
+            ws.send(modeAck(ok));
+            break;
+          }
+          case "getPersonality":
+            ws.send(modeAck(true));
             break;
           case "getReport": {
             const summary = session.getMemory().getSummary();
