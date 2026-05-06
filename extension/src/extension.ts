@@ -124,6 +124,10 @@ export function activate(ctx: vscode.ExtensionContext): void {
     }, maxDiffLines);
   });
 
+  sidebar.onVote((trigger, replyText, vote) => {
+    bridge.vote(trigger, replyText, vote);
+  });
+
   let recording = false;
   const toggleMic = () => {
     if (!recording) {
