@@ -219,7 +219,11 @@ test("10.2 (h) {type:'error'} from the engine surfaces via onError without crash
   bridge.onError((reason) => errors.push(reason));
   assert.equal(bridge.start(), true);
   try {
-    await wait(150);
+    // Deterministic wait — fixed 150ms wasn't enough when the full
+    // daemon suite runs many spawning tests in parallel (child
+    // startup spikes past 150ms under load).
+    const deadline = Date.now() + 3000;
+    while (errors.length < 1 && Date.now() < deadline) await wait(20);
     assert.equal(errors.length, 1);
     assert.equal(errors[0], "model-not-found");
   } finally {
