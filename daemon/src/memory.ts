@@ -11,11 +11,21 @@ export interface MemoryEvent {
   reply_text: string;
 }
 
+/** One row in the misconception map, keyed by anti-pattern name. */
+export interface MisconceptionRecord {
+  count: number;
+  last_seen: number;
+  sample?: string;
+}
+
+export type MisconceptionMap = Record<string, MisconceptionRecord>;
+
 export class MemoryStore {
   private dir: string;
   private logPath: string;
   private summaryPath: string;
   private mutePath: string;
+  private misconceptionsPath: string;
   private cachedSummary = "";
   private eventsSinceSummary = 0;
 
@@ -24,6 +34,7 @@ export class MemoryStore {
     this.logPath = join(dir, "memory.jsonl");
     this.summaryPath = join(dir, "memory.summary.md");
     this.mutePath = join(dir, "mute.json");
+    this.misconceptionsPath = join(dir, "misconceptions.json");
     mkdirSync(this.dir, { recursive: true });
     if (existsSync(this.summaryPath)) {
       this.cachedSummary = readFileSync(this.summaryPath, "utf8");
@@ -100,12 +111,55 @@ export class MemoryStore {
     }
   }
 
-  paths(): { dir: string; log: string; summary: string; mute: string } {
+  /**
+   * Increments the count for `pattern` and refreshes its `last_seen`.
+   * Stores `sample` only if the slot is currently empty so we keep the
+   * earliest concrete example without bloating the file across thousands
+   * of repeats. Persistence is best-effort — write failures are logged
+   * but never thrown so the live trigger path stays clean.
+   */
+  recordMisconception(pattern: string, sample?: string): MisconceptionRecord {
+    const map = this.getMisconceptions();
+    const existing = map[pattern];
+    const next: MisconceptionRecord = existing
+      ? {
+          count: existing.count + 1,
+          last_seen: Date.now(),
+          sample: existing.sample ?? sample,
+        }
+      : { count: 1, last_seen: Date.now(), sample };
+    map[pattern] = next;
+    try {
+      writeFileSync(this.misconceptionsPath, JSON.stringify(map, null, 2), "utf8");
+    } catch (err) {
+      console.error("[memory] misconception write failed", err);
+    }
+    return next;
+  }
+
+  getMisconceptions(): MisconceptionMap {
+    if (!existsSync(this.misconceptionsPath)) return {};
+    try {
+      const raw = readFileSync(this.misconceptionsPath, "utf8");
+      return JSON.parse(raw) as MisconceptionMap;
+    } catch {
+      return {};
+    }
+  }
+
+  paths(): {
+    dir: string;
+    log: string;
+    summary: string;
+    mute: string;
+    misconceptions: string;
+  } {
     return {
       dir: this.dir,
       log: this.logPath,
       summary: this.summaryPath,
       mute: this.mutePath,
+      misconceptions: this.misconceptionsPath,
     };
   }
 }

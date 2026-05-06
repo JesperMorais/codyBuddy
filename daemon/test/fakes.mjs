@@ -64,8 +64,8 @@ export class FakeAnthropicClient {
     return this._summary;
   }
 
-  async distillLearnerProfile(history, priorProfile) {
-    this.calls.distillLearnerProfile.push({ history, priorProfile });
+  async distillLearnerProfile(history, priorProfile, misconceptions = {}) {
+    this.calls.distillLearnerProfile.push({ history, priorProfile, misconceptions });
     this._recordUsage("distillLearnerProfile", "claude-haiku-4-5-20251001");
     return this._profile;
   }

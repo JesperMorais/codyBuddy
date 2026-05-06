@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { Telemetry, type UsageLike } from "./telemetry.js";
+import type { MisconceptionMap } from "./memory.js";
 
 export interface BuddyReply {
   mode: "speak" | "chat" | "no_op";
@@ -32,7 +33,11 @@ export interface AiClient {
     learnerProfile?: string
   ): Promise<BuddyReply>;
   summarize(transcript: string): Promise<string>;
-  distillLearnerProfile(history: string, priorProfile: string): Promise<string>;
+  distillLearnerProfile(
+    history: string,
+    priorProfile: string,
+    misconceptions?: MisconceptionMap
+  ): Promise<string>;
 }
 
 export class AnthropicClient implements AiClient {
@@ -157,7 +162,22 @@ export class AnthropicClient implements AiClient {
     return block && "text" in block ? block.text : "";
   }
 
-  async distillLearnerProfile(history: string, priorProfile: string): Promise<string> {
+  async distillLearnerProfile(
+    history: string,
+    priorProfile: string,
+    misconceptions: MisconceptionMap = {}
+  ): Promise<string> {
+    const sortedMisc = Object.entries(misconceptions)
+      .filter(([, v]) => v.count > 0)
+      .sort((a, b) => b[1].count - a[1].count)
+      .map(([name, v]) => {
+        const sample = v.sample ? ` — sample: ${v.sample.slice(0, 120)}` : "";
+        return `- ${name}: count=${v.count}, last_seen=${new Date(v.last_seen).toISOString()}${sample}`;
+      })
+      .join("\n");
+    const miscBlock = sortedMisc
+      ? `\n\nDetected anti-patterns (counts across the whole session, NOT just recent history):\n${sortedMisc}`
+      : "";
     const res = await this.client.messages.create({
       model: HAIKU_MODEL,
       max_tokens: 400,
@@ -179,7 +199,7 @@ Be terse. Update the prior profile with new evidence; don't repeat unchanged fac
       messages: [
         {
           role: "user",
-          content: `Prior profile:\n${priorProfile || "(none)"}\n\nNew interaction history (most recent last):\n${history}`,
+          content: `Prior profile:\n${priorProfile || "(none)"}\n\nNew interaction history (most recent last):\n${history}${miscBlock}`,
         },
       ],
     });
