@@ -3,7 +3,9 @@ import { readdirSync, readFileSync } from "node:fs";
 import { resolve, dirname, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import { AnthropicClient } from "./anthropic.js";
+import { OllamaClient, DEFAULT_OLLAMA_MODEL } from "./ollama.js";
 import { Session } from "./session.js";
+import type { AiClient } from "./anthropic.js";
 import { TtsBridge } from "./tts-bridge.js";
 import { SttBridge } from "./stt.js";
 import { Recorder } from "./recorder.js";
@@ -14,8 +16,14 @@ import { HttpScreenpipeClient } from "./screenpipe.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
+const provider = (process.env.BUDDY_PROVIDER ?? "anthropic").toLowerCase();
+if (provider !== "anthropic" && provider !== "ollama") {
+  console.error(`[buddy-daemon] BUDDY_PROVIDER must be "anthropic" or "ollama" (got "${provider}").`);
+  process.exit(1);
+}
+
 const apiKey = process.env.ANTHROPIC_API_KEY;
-if (!apiKey) {
+if (provider === "anthropic" && !apiKey) {
   console.error("ANTHROPIC_API_KEY missing. Copy .env.example → .env.");
   process.exit(1);
 }
@@ -45,7 +53,16 @@ for (const f of readdirSync(promptsDir)) {
 }
 console.log(`[buddy-daemon] loaded modes: ${[...prompts.keys()].join(", ")}`);
 
-const client = new AnthropicClient(apiKey, model);
+let client: AiClient;
+if (provider === "ollama") {
+  const ollamaUrl = process.env.BUDDY_OLLAMA_URL ?? "http://localhost:11434/v1";
+  const ollamaModel = process.env.BUDDY_OLLAMA_MODEL ?? DEFAULT_OLLAMA_MODEL;
+  client = new OllamaClient({ baseUrl: ollamaUrl, model: ollamaModel });
+  console.log(`[buddy-daemon] provider=ollama url=${ollamaUrl} model=${ollamaModel}`);
+} else {
+  client = new AnthropicClient(apiKey!, model);
+  console.log(`[buddy-daemon] provider=anthropic model=${model}`);
+}
 const screenpipeUrl = process.env.BUDDY_SCREENPIPE_URL;
 const screenpipe = screenpipeUrl
   ? new HttpScreenpipeClient({ baseUrl: screenpipeUrl })
