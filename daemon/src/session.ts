@@ -31,6 +31,9 @@ export class Session {
     if (!this.prompts.has(this.mode)) {
       throw new Error(`No prompt loaded for default mode "${this.mode}"`);
     }
+    // Restore mute state across daemon restarts. Stale (already-expired)
+    // values are filtered out by MemoryStore.getMutedUntil itself.
+    this.mutedUntil = this.memory.getMutedUntil();
   }
 
   getMemory(): MemoryStore {
@@ -61,10 +64,12 @@ export class Session {
 
   mute(minutes: number): void {
     this.mutedUntil = Date.now() + minutes * 60_000;
+    this.memory.setMutedUntil(this.mutedUntil);
   }
 
   unmute(): void {
     this.mutedUntil = 0;
+    this.memory.setMutedUntil(0);
   }
 
   async handleTrigger(trigger: string, payload: object): Promise<BuddyReply> {

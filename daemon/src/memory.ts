@@ -15,6 +15,7 @@ export class MemoryStore {
   private dir: string;
   private logPath: string;
   private summaryPath: string;
+  private mutePath: string;
   private cachedSummary = "";
   private eventsSinceSummary = 0;
 
@@ -22,6 +23,7 @@ export class MemoryStore {
     this.dir = dir;
     this.logPath = join(dir, "memory.jsonl");
     this.summaryPath = join(dir, "memory.summary.md");
+    this.mutePath = join(dir, "mute.json");
     mkdirSync(this.dir, { recursive: true });
     if (existsSync(this.summaryPath)) {
       this.cachedSummary = readFileSync(this.summaryPath, "utf8");
@@ -66,7 +68,44 @@ export class MemoryStore {
     return out;
   }
 
-  paths(): { dir: string; log: string; summary: string } {
-    return { dir: this.dir, log: this.logPath, summary: this.summaryPath };
+  /**
+   * Returns the persisted mute deadline (epoch ms). 0 means "not muted".
+   * Stale values that have already elapsed are ignored — the file may be
+   * stale across daemon restarts and we don't want to revive expired mutes.
+   */
+  getMutedUntil(): number {
+    if (!existsSync(this.mutePath)) return 0;
+    try {
+      const raw = readFileSync(this.mutePath, "utf8");
+      const parsed = JSON.parse(raw) as { mutedUntil?: number };
+      const ts = Number(parsed.mutedUntil ?? 0);
+      if (!Number.isFinite(ts) || ts <= Date.now()) return 0;
+      return ts;
+    } catch {
+      return 0;
+    }
+  }
+
+  /**
+   * Persists the mute deadline. Pass 0 (or any non-positive value) to clear it.
+   * Disk write failures are swallowed: muting still works in-memory; the
+   * persisted state is best-effort.
+   */
+  setMutedUntil(ts: number): void {
+    const value = Number.isFinite(ts) && ts > 0 ? Math.floor(ts) : 0;
+    try {
+      writeFileSync(this.mutePath, JSON.stringify({ mutedUntil: value }), "utf8");
+    } catch {
+      // best effort
+    }
+  }
+
+  paths(): { dir: string; log: string; summary: string; mute: string } {
+    return {
+      dir: this.dir,
+      log: this.logPath,
+      summary: this.summaryPath,
+      mute: this.mutePath,
+    };
   }
 }
