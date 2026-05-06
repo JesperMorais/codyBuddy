@@ -70,6 +70,11 @@ export class TtsBridge {
    *  12.6). Undefined = no personality override; under "auto", the
    *  bridge falls back to "kokoro" as the default voice path. */
   private personalityCfg?: PersonalityConfig;
+  /** Cap-driven downgrade flag (Task 13.2). When true, every speak()
+   *  is a no-op regardless of backend — the daily USD cap forced
+   *  the buddy into chat-only. The host clears this on the next
+   *  local-midnight rollover via DailyCostCap.applyCapDowngrade. */
+  private suspended = false;
 
   constructor(private cfg: TtsConfig) {}
 
@@ -156,10 +161,30 @@ export class TtsBridge {
 
   async speak(text: string): Promise<void> {
     if (!text || this.cfg.backend === "none") return;
+    // Task 13.2: cap-driven downgrade overrides everything else —
+    // even an explicit "kokoro" or "xtts" backend goes silent when
+    // the daily USD cap has been hit.
+    if (this.suspended) return;
     const cleaned = stripForSpeech(text);
     if (!cleaned) return;
     this.queue.push(cleaned);
     if (!this.busy) void this.drain();
+  }
+
+  /** Cap-driven downgrade switch (Task 13.2). When suspended=true,
+   *  speak() is a no-op even if backend is configured. Idempotent. */
+  setSuspended(suspended: boolean): void {
+    this.suspended = suspended;
+    if (suspended) {
+      // Clear the queue so messages enqueued before the cap-hit
+      // don't drip through after suspension lands.
+      this.queue.length = 0;
+    }
+  }
+
+  /** Read the suspension flag — for tests / introspection. */
+  isSuspended(): boolean {
+    return this.suspended;
   }
 
   /** Drop the queue AND interrupt any in-flight TTS. Returns true if

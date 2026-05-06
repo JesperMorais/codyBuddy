@@ -117,6 +117,11 @@ export class ConversationLoop {
   private deps: ConversationLoopDeps;
   private log: (line: string) => void;
 
+  /** Cap-driven downgrade flag (Task 13.2). When true, transcript()
+   *  drops every utterance — the daily USD cap forced the buddy
+   *  off the voice path. The host clears this on the next
+   *  local-midnight rollover. */
+  private suspended = false;
   /** Aborts the in-flight LLM stream when set; cleared when no
    *  stream is running. */
   private llmAbort?: AbortController;
@@ -206,6 +211,16 @@ export class ConversationLoop {
       this.maybeConsumeOpportunity();
       return;
     }
+    // Cap-driven suspension (Task 13.2): the daily USD cap forced
+    // the loop off the voice path. Drop the transcript and bounce
+    // to IDLE — the chat path keeps working but voice is silent
+    // until the next local-midnight rollover clears suspension.
+    if (this.suspended) {
+      this.log(`[loop] transcript dropped: cap-suspended`);
+      this.transition("IDLE");
+      this.maybeConsumeOpportunity();
+      return;
+    }
     // Auto-quiet gate (Task 13.1): when QUIET, the gate's filter
     // decides whether this transcript reaches the LLM at all. If
     // dropped, we go straight back to IDLE without touching the
@@ -231,6 +246,18 @@ export class ConversationLoop {
    *  wired. Test seam + telemetry hook. */
   quietState(): QuietState | null {
     return this.deps.quietGate?.state() ?? null;
+  }
+
+  /** Cap-driven downgrade switch (Task 13.2). When suspended=true,
+   *  transcript() drops every utterance — the daily USD cap forced
+   *  the buddy off the voice path. */
+  setSuspended(suspended: boolean): void {
+    this.suspended = suspended;
+  }
+
+  /** Read the suspension flag — for tests / introspection. */
+  isSuspended(): boolean {
+    return this.suspended;
   }
 
   /** Editor-side trigger. Queued and consumed only when IDLE so we
