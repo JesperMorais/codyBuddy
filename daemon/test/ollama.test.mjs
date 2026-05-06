@@ -60,7 +60,7 @@ test("7.2 (b) ask() POSTs to /chat/completions with the configured model + syste
   const { telemetry, cleanup } = freshTelemetry();
   try {
     const client = new OllamaClient({ fetchImpl: fakeFetch, telemetry });
-    const reply = await client.ask("system text", "(no summary)", { trigger: "EXPLICIT_ASK" }, "");
+    const reply = await client.ask(["system text"], "(no summary)", { trigger: "EXPLICIT_ASK" });
 
     assert.equal(calls.length, 1);
     assert.equal(calls[0].url, "http://localhost:11434/v1/chat/completions");
@@ -83,14 +83,21 @@ test("7.2 (b) ask() POSTs to /chat/completions with the configured model + syste
   }
 });
 
-test("7.2 (c) ask() folds learnerProfile into the system message", async () => {
+test("7.2 (c) ask() concatenates multiple system blocks into one Ollama system message", async () => {
   const { fakeFetch, calls } = makeFakeFetch([
     chatBody('{"mode":"chat","text":"ok","wants_followup":false}'),
   ]);
   const { telemetry, cleanup } = freshTelemetry();
   try {
     const client = new OllamaClient({ fetchImpl: fakeFetch, telemetry });
-    await client.ask("base prompt", "", {}, "Recurring: forgets await.");
+    await client.ask(
+      [
+        "base prompt",
+        "What I've noticed about this developer over time:\nRecurring: forgets await.",
+      ],
+      "",
+      {}
+    );
     const body = JSON.parse(calls[0].init.body);
     assert.match(body.messages[0].content, /^base prompt/);
     assert.match(body.messages[0].content, /What I've noticed about this developer over time:/);
@@ -105,7 +112,7 @@ test("7.2 (d) ask() falls back to mode=chat for non-JSON output", async () => {
   const { telemetry, cleanup } = freshTelemetry();
   try {
     const client = new OllamaClient({ fetchImpl: fakeFetch, telemetry });
-    const reply = await client.ask("sys", "", {}, "");
+    const reply = await client.ask(["sys"], "", {});
     assert.equal(reply.mode, "chat");
     assert.equal(reply.text, "plain text response, not JSON");
   } finally {
@@ -118,8 +125,8 @@ test("7.2 (e) ask() returns no_op on empty / NO_OP responses", async () => {
   const { telemetry, cleanup } = freshTelemetry();
   try {
     const client = new OllamaClient({ fetchImpl: fakeFetch, telemetry });
-    const r1 = await client.ask("sys", "", {}, "");
-    const r2 = await client.ask("sys", "", {}, "");
+    const r1 = await client.ask(["sys"], "", {});
+    const r2 = await client.ask(["sys"], "", {});
     assert.equal(r1.mode, "no_op");
     assert.equal(r2.mode, "no_op");
   } finally {
@@ -166,7 +173,7 @@ test("7.2 (h) usage tokens are recorded under input_tokens / output_tokens", asy
   const { telemetry, cleanup } = freshTelemetry();
   try {
     const client = new OllamaClient({ fetchImpl: fakeFetch, telemetry });
-    await client.ask("sys", "", {}, "");
+    await client.ask(["sys"], "", {});
     const entries = telemetry.read();
     assert.equal(entries.length, 1);
     assert.equal(entries[0].method, "ask");
@@ -234,7 +241,7 @@ test("7.2 (k) chat() throws on non-2xx — surfaces in ask()", async () => {
   const { telemetry, cleanup } = freshTelemetry();
   try {
     const client = new OllamaClient({ fetchImpl: fakeFetch, telemetry });
-    await assert.rejects(() => client.ask("sys", "", {}, ""), /ollama HTTP 502/);
+    await assert.rejects(() => client.ask(["sys"], "", {}), /ollama HTTP 502/);
   } finally {
     cleanup();
   }

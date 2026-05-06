@@ -68,14 +68,11 @@ export class OllamaClient implements AiClient {
   }
 
   async ask(
-    systemPrompt: string,
+    systemBlocks: string[],
     sessionSummary: string,
-    triggerPayload: object,
-    learnerProfile = ""
+    triggerPayload: object
   ): Promise<BuddyReply> {
-    const system = learnerProfile
-      ? `${systemPrompt}\n\nWhat I've noticed about this developer over time:\n${learnerProfile}`
-      : systemPrompt;
+    const system = systemBlocks.filter((b) => b && b.length > 0).join("\n\n");
     const userText = `Session summary so far:\n${sessionSummary || "(none yet)"}\n\nTrigger event:\n${JSON.stringify(triggerPayload, null, 2)}`;
     const raw = await this.chat("ask", [
       { role: "system", content: system },
