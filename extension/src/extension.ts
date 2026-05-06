@@ -85,7 +85,21 @@ export function activate(ctx: vscode.ExtensionContext): void {
     }
   });
 
-  bridge.onMode(({ mode, available, ok }) => {
+  // Workspace state stores the user's last-known sidebar control values
+  // so a window reload restores the dropdowns immediately, before the
+  // daemon round-trip lands. The daemon is still the source of truth —
+  // the modeSet ack overwrites these on connect.
+  const wsState = ctx.workspaceState;
+  const initialControls = {
+    mode: wsState.get<string>("buddy.mode", "tutor"),
+    available: wsState.get<string[]>("buddy.availableModes", ["tutor"]),
+    personality: wsState.get<string>("buddy.personality", "nice"),
+    availablePersonalities: wsState.get<string[]>("buddy.availablePersonalities", ["nice"]),
+    shuffle: wsState.get<boolean>("buddy.shuffle", false),
+  };
+  sidebar.setControls(initialControls);
+
+  bridge.onMode(({ mode, available, personality, availablePersonalities, shuffle, ok }) => {
     if (available.length) availableModes = available;
     const previous = lastMode;
     lastMode = mode;
@@ -93,7 +107,17 @@ export function activate(ctx: vscode.ExtensionContext): void {
     if (ok && mode !== previous && previous !== "") {
       void vscode.window.setStatusBarMessage(`Coding Buddy mode → ${mode}`, 2000);
     }
+    sidebar.setControls({ mode, available, personality, availablePersonalities, shuffle });
+    void wsState.update("buddy.mode", mode);
+    void wsState.update("buddy.availableModes", available);
+    void wsState.update("buddy.personality", personality);
+    void wsState.update("buddy.availablePersonalities", availablePersonalities);
+    void wsState.update("buddy.shuffle", shuffle);
   });
+
+  sidebar.onModeChange((mode) => bridge.setMode(mode));
+  sidebar.onPersonalityChange((personality) => bridge.setPersonality(personality));
+  sidebar.onShuffleChange((shuffle) => bridge.setShuffle(shuffle));
 
   ctx.subscriptions.push(
     vscode.window.registerWebviewViewProvider(BuddySidebarProvider.viewType, sidebar, {

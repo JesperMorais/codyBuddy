@@ -18,6 +18,7 @@ type ModeHandler = (info: {
   available: string[];
   personality: string;
   availablePersonalities: string[];
+  shuffle: boolean;
   ok: boolean;
 }) => void;
 type ReportHandler = (info: { summary: string; refreshed?: boolean }) => void;
@@ -65,6 +66,10 @@ export class DaemonBridge {
 
   getPersonality(): void {
     this.send({ type: "getPersonality" });
+  }
+
+  setShuffle(shuffle: boolean): void {
+    this.send({ type: "setShuffle", shuffle });
   }
 
   onReport(h: ReportHandler): void {
@@ -200,6 +205,7 @@ export class DaemonBridge {
             availablePersonalities: Array.isArray(msg.availablePersonalities)
               ? (msg.availablePersonalities as string[])
               : [],
+            shuffle: !!msg.shuffle,
             ok: !!msg.ok,
           });
         } else if (msg.type === "report" && this.reportHandler) {

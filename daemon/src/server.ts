@@ -18,9 +18,9 @@ export function startServer(deps: ServerDeps): WebSocketServer {
   const { session, tts, stt, recorder, port, votes } = deps;
   const wss = new WebSocketServer({ host: "127.0.0.1", port });
 
-  // The modeSet ack carries both dimensions (mode + personality) so the
-  // sidebar updates them in one round-trip whether the user changed the
-  // mode, the personality, or just connected.
+  // The modeSet ack carries every personality-axis dimension (mode,
+  // personality, shuffle) so the sidebar updates them in one round-trip
+  // whether the user changed any of them or just connected.
   const modeAck = (ok: boolean): string =>
     JSON.stringify({
       type: "modeSet",
@@ -29,6 +29,7 @@ export function startServer(deps: ServerDeps): WebSocketServer {
       available: session.listModes(),
       personality: session.getPersonality(),
       availablePersonalities: session.listPersonalities(),
+      shuffle: session.isShuffle(),
     });
 
   wss.on("connection", (ws: WebSocket) => {
@@ -187,6 +188,12 @@ export function startServer(deps: ServerDeps): WebSocketServer {
           case "getPersonality":
             ws.send(modeAck(true));
             break;
+          case "setShuffle": {
+            const value = Boolean((msg as { shuffle?: boolean }).shuffle);
+            session.setShuffle(value);
+            ws.send(modeAck(true));
+            break;
+          }
           case "getReport": {
             const summary = session.getMemory().getSummary();
             const paths = session.getMemory().paths();
