@@ -1,0 +1,6 @@
+{
+  "voice_engine": "kokoro",
+  "rate": 0.95,
+  "energy": 0.8,
+  "pause_factor": 1.2
+}
