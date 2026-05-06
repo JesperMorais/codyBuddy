@@ -1,10 +1,13 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { Telemetry, type UsageLike } from "./telemetry.js";
 
 export interface BuddyReply {
   mode: "speak" | "chat" | "no_op";
   text: string;
   wants_followup: boolean;
 }
+
+const HAIKU_MODEL = "claude-haiku-4-5-20251001";
 
 /** Verdict from the cheap Haiku gate that decides whether the expensive
  *  Sonnet round-trip is worth doing for a given trigger. */
@@ -35,10 +38,12 @@ export interface AiClient {
 export class AnthropicClient implements AiClient {
   private client: Anthropic;
   private model: string;
+  private telemetry: Telemetry;
 
-  constructor(apiKey: string, model: string) {
+  constructor(apiKey: string, model: string, opts: { telemetry?: Telemetry } = {}) {
     this.client = new Anthropic({ apiKey });
     this.model = model;
+    this.telemetry = opts.telemetry ?? new Telemetry();
   }
 
   async ask(
@@ -85,6 +90,7 @@ export class AnthropicClient implements AiClient {
     });
 
     const final = await stream.finalMessage();
+    this.telemetry.record("ask", this.model, (final.usage ?? {}) as UsageLike);
     const textBlock = final.content.find((b) => b.type === "text");
     const raw = textBlock && "text" in textBlock ? textBlock.text.trim() : "";
 
@@ -114,7 +120,7 @@ export class AnthropicClient implements AiClient {
   async shouldSpeak(triggerPayload: object, sessionSummary: string): Promise<SpeakDecision> {
     try {
       const res = await this.client.messages.create({
-        model: "claude-haiku-4-5-20251001",
+        model: HAIKU_MODEL,
         max_tokens: 8,
         system:
           "You are a fast gate for a coding buddy. Given a trigger event from the user's editor, decide whether the buddy should: speak (high confidence the user benefits from a spoken nudge), chat (worth a sidebar reply but not voice), or no_op (stay silent). Reply with EXACTLY one of: speak, chat, no_op. No punctuation, no explanation.",
@@ -125,6 +131,7 @@ export class AnthropicClient implements AiClient {
           },
         ],
       });
+      this.telemetry.record("shouldSpeak", HAIKU_MODEL, (res.usage ?? {}) as UsageLike);
       const block = res.content.find((b) => b.type === "text");
       const raw = block && "text" in block ? block.text.trim().toLowerCase() : "";
       if (raw === "speak" || raw === "chat" || raw === "no_op") return raw;
@@ -139,19 +146,20 @@ export class AnthropicClient implements AiClient {
 
   async summarize(transcript: string): Promise<string> {
     const res = await this.client.messages.create({
-      model: "claude-haiku-4-5-20251001",
+      model: HAIKU_MODEL,
       max_tokens: 250,
       system:
         "Summarize the developer's last 30 minutes of activity into 5-8 terse bullets focused on: what they're building, blockers hit, misconceptions shown, things they got right. No fluff.",
       messages: [{ role: "user", content: transcript }],
     });
+    this.telemetry.record("summarize", HAIKU_MODEL, (res.usage ?? {}) as UsageLike);
     const block = res.content.find((b) => b.type === "text");
     return block && "text" in block ? block.text : "";
   }
 
   async distillLearnerProfile(history: string, priorProfile: string): Promise<string> {
     const res = await this.client.messages.create({
-      model: "claude-haiku-4-5-20251001",
+      model: HAIKU_MODEL,
       max_tokens: 400,
       system: `You maintain a long-term learner profile for a developer based on their interactions with a coding buddy. Your job: distill recurring patterns. Output 5-10 bullets, grouped under exactly these headings (omit a heading if empty):
 
@@ -175,6 +183,7 @@ Be terse. Update the prior profile with new evidence; don't repeat unchanged fac
         },
       ],
     });
+    this.telemetry.record("distillLearnerProfile", HAIKU_MODEL, (res.usage ?? {}) as UsageLike);
     const block = res.content.find((b) => b.type === "text");
     return block && "text" in block ? block.text.trim() : priorProfile;
   }
