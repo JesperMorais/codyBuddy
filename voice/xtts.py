@@ -66,6 +66,14 @@ class SynthRequest(BaseModel):
     text: str
     ref_clip: str
     language: Optional[str] = "en"
+    # Task 12.5: per-personality prosody multipliers. XTTS-v2's
+    # TTS.tts() takes a `speed` arg directly (mapped from `rate`);
+    # `energy` is applied as a post-synth amplitude scale and
+    # `pause_factor` extends the trailing silence (best-effort,
+    # since XTTS doesn't expose either knob natively).
+    rate: Optional[float] = 1.0
+    energy: Optional[float] = 1.0
+    pause_factor: Optional[float] = 1.0
 
 
 def _cuda_available() -> bool:
@@ -146,6 +154,14 @@ async def synth(req: SynthRequest):
             }
         )
 
+    # Clamp prosody multipliers to a sensible range. XTTS-v2 accepts
+    # `speed` in roughly [0.5, 2.0]; values outside that range either
+    # produce unintelligible audio or are silently clamped by the
+    # model anyway.
+    rate = max(0.5, min(2.0, float(req.rate or 1.0)))
+    energy = max(0.0, min(2.0, float(req.energy or 1.0)))
+    pause_factor = max(0.5, min(3.0, float(req.pause_factor or 1.0)))
+
     loop = asyncio.get_running_loop()
     try:
         samples = await loop.run_in_executor(
@@ -154,6 +170,7 @@ async def synth(req: SynthRequest):
                 text=text,
                 speaker_wav=str(ref),
                 language=req.language or "en",
+                speed=rate,
             ),
         )
     except Exception as exc:
@@ -164,9 +181,29 @@ async def synth(req: SynthRequest):
         import numpy as np
 
         arr = np.asarray(samples)
+        # Apply energy as an amplitude scale before int16 conversion
+        # so the clip-clamp at int16 boundaries lines up with the
+        # scaled signal, not the original.
         if arr.dtype != np.int16:
-            # XTTS returns float32 in [-1, 1]; convert for the wire.
-            arr = (np.clip(arr, -1.0, 1.0) * 32767).astype(np.int16)
+            scaled = arr.astype(np.float32) * energy
+            arr = (np.clip(scaled, -1.0, 1.0) * 32767).astype(np.int16)
+        else:
+            # Already int16 — apply energy in int space, clipping at
+            # int16 bounds.
+            scaled = arr.astype(np.int32) * energy
+            arr = np.clip(scaled, -32768, 32767).astype(np.int16)
+        # Pause-factor: append trailing silence proportional to
+        # (pause_factor - 1) * one-sentence-pause. This is what
+        # users actually feel between sentences in a multi-sentence
+        # turn — XTTS itself emits no trailing silence, so the
+        # sidecar appends it.
+        if pause_factor > 1.0:
+            base_pause_ms = 200  # natural inter-sentence pause
+            extra_ms = int(base_pause_ms * (pause_factor - 1.0))
+            tail_samples = int(XTTS_SAMPLE_RATE * extra_ms / 1000)
+            if tail_samples > 0:
+                tail = np.zeros(tail_samples, dtype=np.int16)
+                arr = np.concatenate([arr, tail])
         chunk_samples = max(1, int(XTTS_SAMPLE_RATE * CHUNK_MS / 1000))
         for i in range(0, len(arr), chunk_samples):
             yield arr[i : i + chunk_samples].tobytes()
