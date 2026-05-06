@@ -1,6 +1,6 @@
 {
-  "voice_engine": "kokoro",
-  "kokoro_voice": "am_adam",
+  "voice_engine": "xtts",
+  "xtts_ref": "refs/drill_sergeant.wav",
   "rate": 1.1,
   "energy": 1.3,
   "pause_factor": 0.7

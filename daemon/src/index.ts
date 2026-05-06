@@ -44,6 +44,8 @@ try {
 const piperExe = process.env.BUDDY_PIPER_EXE;
 const piperVoice = process.env.BUDDY_PIPER_VOICE;
 const kokoroUrl = process.env.BUDDY_KOKORO_URL;
+const xttsUrl = process.env.BUDDY_XTTS_URL;
+const xttsLanguage = process.env.BUDDY_XTTS_LANGUAGE;
 const ttsVolume = Number(process.env.BUDDY_TTS_VOLUME ?? "0.5");
 const whisperExe = process.env.BUDDY_WHISPER_EXE;
 const whisperModel = process.env.BUDDY_WHISPER_MODEL;
@@ -127,6 +129,8 @@ const tts = new TtsBridge({
   piperExe,
   piperVoice,
   kokoroUrl,
+  xttsUrl,
+  xttsLanguage,
   volume: ttsVolume,
 });
 const stt = new SttBridge({ exe: whisperExe, model: whisperModel });
@@ -142,6 +146,7 @@ const wss = startServer({
   votes,
   gatedPersonalities,
   kokoroVoiceFor,
+  personalityVoiceConfigs: personalityConfigs,
 });
 console.log(
   `[buddy-daemon] listening on ws://127.0.0.1:${port} (model=${model}, tts=${tts.describe()}, stt=${stt.describe()})`

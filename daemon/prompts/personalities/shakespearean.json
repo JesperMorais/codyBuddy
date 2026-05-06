@@ -1,6 +1,6 @@
 {
-  "voice_engine": "kokoro",
-  "kokoro_voice": "am_adam",
+  "voice_engine": "xtts",
+  "xtts_ref": "refs/shakespearean.wav",
   "rate": 0.9,
   "energy": 1.0,
   "pause_factor": 1.25
