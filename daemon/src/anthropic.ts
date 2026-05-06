@@ -41,6 +41,32 @@ export interface AiClient {
     sessionSummary: string,
     triggerPayload: object
   ): Promise<BuddyReply>;
+  /**
+   * Streaming variant for the conversation loop (Task 11.1). Yields
+   * raw text deltas as they arrive — no JSON parsing, no buffering.
+   * The conversation loop's sentence-buffer adapter (Task 11.2)
+   * collects deltas into sentence-shaped chunks for the streaming
+   * Kokoro TTS bridge (Task 10.3).
+   *
+   * Unlike `ask`, this does NOT take `sessionSummary` as a separate
+   * arg — by the time the loop reaches askStream, the payload built
+   * by the conversation-context assembler (Task 10.9) already
+   * contains every relevant input (transcript history, editor
+   * context, triggers).
+   *
+   * The `signal` parameter is the loop's barge-in mechanism: when
+   * VAD reports speech.start mid-utterance, the loop aborts, the
+   * underlying SDK stream is cancelled, and the iterator finishes
+   * cleanly without yielding more deltas. See Task 10.5.
+   *
+   * Implementations may yield zero deltas (model returned empty),
+   * which the loop handles as THINKING → IDLE.
+   */
+  askStream(
+    systemBlocks: string[],
+    triggerPayload: object,
+    signal?: AbortSignal
+  ): AsyncIterable<string>;
   summarize(transcript: string): Promise<string>;
   distillLearnerProfile(
     history: string,
@@ -120,6 +146,95 @@ export class AnthropicClient implements AiClient {
       };
     } catch {
       return { mode: "chat", text: raw, wants_followup: false };
+    }
+  }
+
+  /** Task 11.1: streaming variant of `ask` for the conversation loop.
+   *  Yields raw text deltas as the SDK delivers them. The barge-in
+   *  signal cancels the underlying SDK stream so the iterator stops
+   *  promptly when the user starts talking again. */
+  async *askStream(
+    systemBlocks: string[],
+    triggerPayload: object,
+    signal?: AbortSignal
+  ): AsyncIterable<string> {
+    const blocks = systemBlocks
+      .filter((b) => b && b.length > 0)
+      .map((text) => ({
+        type: "text" as const,
+        text,
+        cache_control: { type: "ephemeral" as const },
+      }));
+
+    const stream = this.client.messages.stream({
+      model: this.model,
+      max_tokens: 400,
+      system: blocks,
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: JSON.stringify(triggerPayload) },
+          ],
+        },
+      ],
+    });
+
+    if (signal) {
+      if (signal.aborted) {
+        try {
+          stream.abort();
+        } catch {
+          // already done
+        }
+        return;
+      }
+      const onAbort = () => {
+        try {
+          stream.abort();
+        } catch {
+          // ignore
+        }
+      };
+      signal.addEventListener("abort", onAbort, { once: true });
+      // Best-effort cleanup: remove the listener when the iterator
+      // exits naturally so a long-lived AbortController doesn't pin
+      // the stream object in memory.
+      try {
+        for await (const text of textDeltas(stream)) {
+          if (signal.aborted) break;
+          yield text;
+        }
+      } finally {
+        try {
+          signal.removeEventListener("abort", onAbort);
+        } catch {
+          // older runtimes
+        }
+        await this.recordStreamUsage(stream);
+      }
+      return;
+    }
+
+    try {
+      for await (const text of textDeltas(stream)) {
+        yield text;
+      }
+    } finally {
+      await this.recordStreamUsage(stream);
+    }
+  }
+
+  /** Subscribes to the SDK's finalMessage promise and records the
+   *  usage block to telemetry. Errors (aborted stream, network) are
+   *  swallowed — the live trigger path mustn't be blocked by a
+   *  telemetry failure. */
+  private async recordStreamUsage(stream: { finalMessage: () => Promise<{ usage?: unknown }> }): Promise<void> {
+    try {
+      const final = await stream.finalMessage();
+      this.telemetry.record("askStream", this.model, (final.usage ?? {}) as UsageLike);
+    } catch {
+      // ignore — usage isn't recoverable on aborted streams
     }
   }
 
@@ -214,5 +329,24 @@ Be terse. Update the prior profile with new evidence; don't repeat unchanged fac
     const end = raw.lastIndexOf("}");
     if (start === -1 || end === -1) return raw;
     return raw.slice(start, end + 1);
+  }
+}
+
+/**
+ * Pure helper: walks an Anthropic SDK MessageStream's event iterator
+ * and yields each text delta. Typed permissively (`unknown`) so it
+ * accepts the SDK's `RawMessageStreamEvent` and any compatible
+ * fixture shape tests hand it.
+ */
+export async function* textDeltas(stream: AsyncIterable<unknown>): AsyncIterable<string> {
+  for await (const raw of stream) {
+    const event = raw as { type?: string; delta?: { type?: string; text?: string } };
+    if (
+      event.type === "content_block_delta" &&
+      event.delta?.type === "text_delta" &&
+      typeof event.delta.text === "string"
+    ) {
+      yield event.delta.text;
+    }
   }
 }
