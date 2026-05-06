@@ -43,7 +43,7 @@ Source spec: `RESEARCH.md` §5.2 (MVP), §5.3 (post-MVP), §5.4 (cost model).
 
 ## Phase 5 — Trigger quality + misconception memory
 
-- [ ] **5.1** Expand `ANTI_PATTERNS` in `triggers.ts`: add Python (`mutable default arg`, `bare except`), TypeScript (`as any`, unawaited `Promise<…>`), and generic (`while (true)` with no `break`). Each pattern needs a positive and negative unit test.
+- [x] **5.1** Expand `ANTI_PATTERNS` in `triggers.ts`: add Python (`mutable default arg`, `bare except`), TypeScript (`as any`, unawaited `Promise<…>`), and generic (`while (true)` with no `break`). Each pattern needs a positive and negative unit test.
 - [ ] **5.2** Replace `MemoryStore` free-text history with a `{ pattern -> {count, last_seen, sample} }` map for misconceptions, alongside the existing transcript log. Migrate `distillLearnerProfile` to receive counts directly.
 - [ ] **5.3** Test: triggering the same anti-pattern 3 times across separate `handleTrigger` calls produces a "Recurring misconceptions" entry with count ≥ 3 in the next learner profile distill.
 

@@ -30,10 +30,42 @@ const TRIGGER_COMMENT = /(\bAI[?!]|\bWHY\?|\bSTUCK\b)\s*$/;
 
 const ERROR_SEVERITY = 0;
 
-const ANTI_PATTERNS: { name: string; re: RegExp }[] = [
+type AntiPattern =
+  | { name: string; re: RegExp }
+  | { name: string; check: (text: string) => boolean };
+
+const ANTI_PATTERNS: AntiPattern[] = [
+  // Existing
   { name: "await-in-non-async", re: /^(?!.*async).*\bawait\b/m },
   { name: "mutate-during-iteration", re: /for\s*\(.+?\)\s*\{[\s\S]{0,400}?\.(push|splice|shift|unshift|pop)\(/ },
   { name: "double-equals", re: /[^=!<>]==[^=]/ },
+  // Python — mutable default argument: def foo(x=[]) / def foo(x={})
+  { name: "py-mutable-default-arg", re: /def\s+\w+\s*\([^)]*=\s*[\[\{]/ },
+  // Python — bare except: clause has no exception class
+  { name: "py-bare-except", re: /^[\t ]*except\s*:/m },
+  // TypeScript — `as any` cast escapes the type system entirely
+  { name: "ts-as-any", re: /\bas\s+any\b/ },
+  // TypeScript / JS — `.then()` chain on a statement line that's not
+  // returned, awaited, or explicitly voided (typical fire-and-forget
+  // Promise mistake). Predicate form so we can look at what precedes
+  // the `.then(` token on the line, not just the whole line.
+  {
+    name: "ts-unawaited-then",
+    check: (text) =>
+      text.split("\n").some((line) => {
+        const idx = line.indexOf(".then(");
+        if (idx === -1) return false;
+        const before = line.slice(0, idx);
+        return !/\b(?:return|await|void)\b/.test(before);
+      }),
+  },
+  // Generic — `while (true)` with no `break` anywhere in the visible text.
+  // Encoded as a predicate because expressing "matches X AND not Y" in a
+  // single JS regex is ugly across multiline content.
+  {
+    name: "while-true-no-break",
+    check: (text) => /while\s*\(\s*true\s*\)/.test(text) && !/\bbreak\b/.test(text),
+  },
 ];
 
 export class TriggerEngine {
@@ -123,7 +155,8 @@ export class TriggerEngine {
 
   evaluateMisconception(text: string): TriggerEvent | null {
     for (const ap of ANTI_PATTERNS) {
-      if (ap.re.test(text) && this.canSpeakAgain()) {
+      const hit = "re" in ap ? ap.re.test(text) : ap.check(text);
+      if (hit && this.canSpeakAgain()) {
         return { trigger: "MISCONCEPTION", reason: `anti-pattern: ${ap.name}` };
       }
     }
