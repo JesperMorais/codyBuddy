@@ -13,6 +13,8 @@ import { startServer } from "./server.js";
 import { HttpScreenpipeClient } from "./screenpipe.js";
 import { VoteStore } from "./votes.js";
 import { loadPromptDir, loadPersonalities } from "./personalities-loader.js";
+import { existsSync } from "node:fs";
+import { findVoiceDir, spawnVoiceSidecar } from "./voice-sidecar.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -115,8 +117,35 @@ console.log(
   `[buddy-daemon] listening on ws://127.0.0.1:${port} (model=${model}, tts=${tts.describe()}, stt=${stt.describe()})`
 );
 
+// Optional: supervise the voice sidecar from the daemon. Off by
+// default — voice is still typically run via `pnpm dev:voice` in a
+// dedicated terminal during development. BUDDY_VAD_SPAWN=true flips
+// the daemon into "I own the python process" mode for /vad consumers.
+let voiceSidecar: ReturnType<typeof spawnVoiceSidecar> | undefined;
+if ((process.env.BUDDY_VAD_SPAWN ?? "").toLowerCase() === "true") {
+  const voiceDir = findVoiceDir(__dirname, existsSync);
+  if (!voiceDir) {
+    console.warn(
+      "[buddy-daemon] BUDDY_VAD_SPAWN=true but voice/main.py not found — skipping sidecar spawn"
+    );
+  } else {
+    const voicePort = Number(process.env.BUDDY_VOICE_PORT ?? 31416);
+    const pythonBin = process.env.BUDDY_PYTHON ?? "python3";
+    console.log(
+      `[buddy-daemon] spawning voice sidecar (cwd=${voiceDir} port=${voicePort} python=${pythonBin})`
+    );
+    voiceSidecar = spawnVoiceSidecar({
+      voiceDir,
+      port: voicePort,
+      pythonBin,
+      log: (line) => console.log(line),
+    });
+  }
+}
+
 process.on("SIGINT", () => {
   console.log("\n[buddy-daemon] shutting down");
+  voiceSidecar?.dispose();
   wss.close();
   process.exit(0);
 });
