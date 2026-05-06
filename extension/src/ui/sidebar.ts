@@ -12,6 +12,7 @@ export class BuddySidebarProvider implements vscode.WebviewViewProvider {
   private pending: SidebarMessage[] = [];
   private askInputHandler?: (text: string) => void;
   private micToggleHandler?: () => void;
+  private voteHandler?: (trigger: string, replyText: string, vote: "up" | "down") => void;
   private voiceEnabled = true;
   private voiceRate = 1.05;
 
@@ -24,6 +25,9 @@ export class BuddySidebarProvider implements vscode.WebviewViewProvider {
         this.askInputHandler(String(msg.text ?? ""));
       } else if (msg.type === "micToggle") {
         this.micToggleHandler?.();
+      } else if (msg.type === "vote" && this.voteHandler) {
+        const v = msg.vote === "down" ? "down" : "up";
+        this.voteHandler(String(msg.trigger ?? ""), String(msg.reply_text ?? ""), v);
       }
     });
     this.view.webview.postMessage({ type: "voiceConfig", enabled: this.voiceEnabled, rate: this.voiceRate });
@@ -36,6 +40,10 @@ export class BuddySidebarProvider implements vscode.WebviewViewProvider {
 
   onMicToggle(h: () => void): void {
     this.micToggleHandler = h;
+  }
+
+  onVote(h: (trigger: string, replyText: string, vote: "up" | "down") => void): void {
+    this.voteHandler = h;
   }
 
   setVoice(enabled: boolean): void {
@@ -110,6 +118,10 @@ export class BuddySidebarProvider implements vscode.WebviewViewProvider {
   .speak { border-left: 3px solid var(--vscode-charts-green); }
   .chat { border-left: 3px solid var(--vscode-charts-blue); }
   .status { font-size: 11px; opacity: 0.6; font-style: italic; margin: 4px 0; }
+  .votes { margin-top: 4px; display: flex; gap: 4px; }
+  .vote-btn { background: transparent; border: 1px solid var(--vscode-input-border); color: inherit; cursor: pointer; padding: 1px 6px; border-radius: 3px; font-size: 12px; opacity: 0.6; }
+  .vote-btn:hover { opacity: 1; }
+  .vote-btn.voted { opacity: 1; background: var(--vscode-button-secondaryBackground); }
   #ask-row { display: flex; gap: 4px; margin-top: 8px; align-items: stretch; }
   #ask { flex: 1; padding: 6px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border); }
   #mic { width: 32px; padding: 0; background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); border: 1px solid var(--vscode-input-border); cursor: pointer; font-size: 14px; }
@@ -256,6 +268,29 @@ export class BuddySidebarProvider implements vscode.WebviewViewProvider {
       const triggerHtml = '<div class="trigger">' + escapeHtml(m.trigger + ' · ' + m.reply.mode) + '</div>';
       const textHtml = '<div class="text">' + (m.reply.text ? renderMarkdown(text) : '<p>(no_op)</p>') + '</div>';
       div.innerHTML = triggerHtml + textHtml;
+      if (m.reply.text && m.reply.mode !== 'no_op') {
+        const votes = document.createElement('div');
+        votes.className = 'votes';
+        const up = document.createElement('button');
+        up.className = 'vote-btn';
+        up.title = 'Useful';
+        up.textContent = '👍';
+        const down = document.createElement('button');
+        down.className = 'vote-btn';
+        down.title = 'Not useful';
+        down.textContent = '👎';
+        const cast = (vote, btn) => {
+          vscode.postMessage({ type: 'vote', trigger: m.trigger, reply_text: m.reply.text, vote });
+          up.classList.remove('voted');
+          down.classList.remove('voted');
+          btn.classList.add('voted');
+        };
+        up.addEventListener('click', () => cast('up', up));
+        down.addEventListener('click', () => cast('down', down));
+        votes.appendChild(up);
+        votes.appendChild(down);
+        div.appendChild(votes);
+      }
       log.appendChild(div);
       log.scrollTop = log.scrollHeight;
       if (m.reply.text && m.reply.mode !== 'no_op') speak(text);

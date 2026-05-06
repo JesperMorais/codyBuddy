@@ -3,6 +3,7 @@ import type { Session } from "./session.js";
 import type { TtsBridge } from "./tts-bridge.js";
 import type { SttBridge } from "./stt.js";
 import type { Recorder } from "./recorder.js";
+import type { VoteStore } from "./votes.js";
 
 export interface ServerDeps {
   session: Session;
@@ -10,10 +11,11 @@ export interface ServerDeps {
   stt: SttBridge;
   recorder: Recorder;
   port: number;
+  votes?: VoteStore;
 }
 
 export function startServer(deps: ServerDeps): WebSocketServer {
-  const { session, tts, stt, recorder, port } = deps;
+  const { session, tts, stt, recorder, port, votes } = deps;
   const wss = new WebSocketServer({ host: "127.0.0.1", port });
 
   wss.on("connection", (ws: WebSocket) => {
@@ -75,6 +77,21 @@ export function startServer(deps: ServerDeps): WebSocketServer {
           case "ping":
             ws.send(JSON.stringify({ type: "pong" }));
             break;
+          case "vote": {
+            if (!votes) {
+              ws.send(JSON.stringify({ type: "voteAck", ok: false, error: "votes disabled" }));
+              break;
+            }
+            const v = msg as { trigger?: string; reply_text?: string; vote?: string };
+            const value = v.vote === "down" ? "down" : "up";
+            const entry = votes.record({
+              trigger: String(v.trigger ?? "unknown"),
+              reply_text: String(v.reply_text ?? ""),
+              vote: value,
+            });
+            ws.send(JSON.stringify({ type: "voteAck", ok: true, ts: entry.ts }));
+            break;
+          }
           case "setVolume": {
             const v = Number((msg as { volume?: number }).volume ?? 0.5);
             tts.setVolume(v);

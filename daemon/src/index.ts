@@ -12,6 +12,7 @@ import { Recorder } from "./recorder.js";
 import { parseTtsBackend } from "./config.js";
 import { startServer } from "./server.js";
 import { HttpScreenpipeClient } from "./screenpipe.js";
+import { VoteStore } from "./votes.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -81,7 +82,8 @@ const tts = new TtsBridge({
 const stt = new SttBridge({ exe: whisperExe, model: whisperModel });
 const recorder = new Recorder();
 
-const wss = startServer({ session, tts, stt, recorder, port });
+const votes = new VoteStore();
+const wss = startServer({ session, tts, stt, recorder, port, votes });
 console.log(
   `[buddy-daemon] listening on ws://127.0.0.1:${port} (model=${model}, tts=${tts.describe()}, stt=${stt.describe()})`
 );

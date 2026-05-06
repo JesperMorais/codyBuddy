@@ -56,7 +56,7 @@ Source spec: `RESEARCH.md` §5.2 (MVP), §5.3 (post-MVP), §5.4 (cost model).
 
 - [x] **7.1** Screenpipe MCP integration: add a `screenpipe.queryRecent(seconds)` tool to the daemon, invoked only on `EXPLICIT_ASK` when `recent_diff` is empty. Test against a stub MCP server.
 - [x] **7.2** Ollama fallback: add `BUDDY_PROVIDER=ollama|anthropic` env, swap `AnthropicClient` for an OpenAI-compatible client at `http://localhost:11434/v1` when set to `ollama`. Default model `qwen2.5-coder:32b`. Test with a mocked Ollama HTTP endpoint.
-- [ ] **7.3** Telemetry-driven tuning: add thumbs-up/thumbs-down buttons to the sidebar webview; persist `{trigger, reply_text, vote, ts}` to JSONL. Add a `scripts/tune-triggers.mjs` that reads the log and prints suggested threshold deltas.
+- [x] **7.3** Telemetry-driven tuning: add thumbs-up/thumbs-down buttons to the sidebar webview; persist `{trigger, reply_text, vote, ts}` to JSONL. Add a `scripts/tune-triggers.mjs` that reads the log and prints suggested threshold deltas.
 
 ## Phase 8 — Docs
 

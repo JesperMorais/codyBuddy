@@ -93,6 +93,10 @@ export class DaemonBridge {
     this.send({ type: "recordStop", requestId });
   }
 
+  vote(trigger: string, reply_text: string, vote: "up" | "down"): void {
+    this.send({ type: "vote", trigger, reply_text, vote });
+  }
+
   /** Subscribe to daemon up/down transitions. The handler fires whenever
    *  the bridge's view of daemon health changes (ping→pong, disconnect, etc.). */
   onHealth(h: HealthHandler): void {
