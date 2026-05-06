@@ -312,6 +312,23 @@ export function activate(ctx: vscode.ExtensionContext): void {
   );
 
   ctx.subscriptions.push(
+    vscode.commands.registerCommand("coding-buddy.hardMute", () => {
+      // Task 10.4: fire-and-forget — the daemon kills mic + TTS in
+      // <50ms. We optimistically clear the local recording state so
+      // the sidebar's mic button stops pulsing immediately, before
+      // the hardMuted ack arrives.
+      bridge.hardMute();
+      if (recording) {
+        recording = false;
+        sidebar.setRecordingState(false);
+      }
+      sidebar.stopSpeech();
+      sidebar.pushStatus("Hard mute: mic and TTS killed.");
+      void vscode.window.setStatusBarMessage("Coding Buddy: hard muted", 2000);
+    })
+  );
+
+  ctx.subscriptions.push(
     vscode.commands.registerCommand("coding-buddy.testVoice", async () => {
       if (!sidebar.isReady()) {
         await vscode.commands.executeCommand("workbench.view.extension.coding-buddy");

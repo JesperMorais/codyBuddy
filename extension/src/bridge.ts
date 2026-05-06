@@ -153,6 +153,13 @@ export class DaemonBridge {
     this.send({ type: "unmute" });
   }
 
+  /** Hard-mute hotkey (Task 10.4): tells the daemon to kill mic input
+   *  and SIGINT any in-flight TTS subprocess. Different from mute(),
+   *  which just queues silence — this is for "stop everything NOW". */
+  hardMute(): void {
+    this.send({ type: "hardMute" });
+  }
+
   dispose(): void {
     this.disposed = true;
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);

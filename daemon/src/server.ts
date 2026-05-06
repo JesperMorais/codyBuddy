@@ -92,6 +92,26 @@ export function startServer(deps: ServerDeps): WebSocketServer {
             ws.send(JSON.stringify({ type: "unmuted" }));
             break;
           }
+          case "hardMute": {
+            // Task 10.4: kill mic input AND any in-flight TTS in <50ms.
+            // Both ops are synchronous so the work happens before we
+            // even hit the ws.send below — the round-trip is dominated
+            // by the WS client→server frame, not us.
+            const startedAt = Date.now();
+            const wasRecording = recorder.isRecording();
+            recorder.cancel();
+            const ttsResult = tts.cancel();
+            const elapsedMs = Date.now() - startedAt;
+            ws.send(
+              JSON.stringify({
+                type: "hardMuted",
+                micCancelled: wasRecording,
+                ttsSignaled: ttsResult.signaled,
+                elapsedMs,
+              })
+            );
+            break;
+          }
           case "ping":
             ws.send(JSON.stringify({ type: "pong" }));
             break;

@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { mkdtempSync, writeFileSync, unlinkSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -29,6 +29,13 @@ const DEFAULT_KOKORO_URL = "http://127.0.0.1:31416/tts";
 export class TtsBridge {
   private busy = false;
   private queue: string[] = [];
+  /** In-flight subprocess (Piper synth or PowerShell playback). Held
+   *  so cancel() can SIGINT it for the hard-mute hotkey (Task 10.4),
+   *  not just clear the queue. */
+  private activeProc?: ChildProcess;
+  /** AbortController for the in-flight Kokoro fetch. Same role as
+   *  activeProc, for the HTTP path. */
+  private activeAbort?: AbortController;
 
   constructor(private cfg: TtsConfig) {}
 
@@ -63,8 +70,32 @@ export class TtsBridge {
     if (!this.busy) void this.drain();
   }
 
-  cancel(): void {
+  /** Drop the queue AND interrupt any in-flight TTS. Returns true if
+   *  a SIGINT was sent (i.e. there was an active Piper/playback
+   *  subprocess) — the hard-mute handler uses that to confirm the
+   *  spec's <50ms kill landed. */
+  cancel(): { signaled: boolean } {
     this.queue.length = 0;
+    let signaled = false;
+    if (this.activeProc && this.activeProc.exitCode === null) {
+      try {
+        this.activeProc.kill("SIGINT");
+        signaled = true;
+      } catch {
+        // already dead; nothing to do
+      }
+    }
+    this.activeProc = undefined;
+    if (this.activeAbort) {
+      try {
+        this.activeAbort.abort();
+        signaled = true;
+      } catch {
+        // ignore
+      }
+      this.activeAbort = undefined;
+    }
+    return { signaled };
   }
 
   private async drain(): Promise<void> {
@@ -105,19 +136,20 @@ export class TtsBridge {
       const piper = spawnFn(exe, ["--model", voice, "--output_file", wavPath], {
         windowsHide: true,
       });
+      this.activeProc = piper;
       let stderr = "";
       piper.stderr?.on("data", (d) => (stderr += d.toString()));
       piper.on("error", reject);
-      piper.on("close", (code) =>
-        code === 0
-          ? resolve()
-          : reject(new Error(`piper exit ${code}: ${stderr.slice(0, 200)}`))
-      );
+      piper.on("close", (code) => {
+        if (this.activeProc === piper) this.activeProc = undefined;
+        if (code === 0) resolve();
+        else reject(new Error(`piper exit ${code}: ${stderr.slice(0, 200)}`));
+      });
       piper.stdin?.write(text + "\n");
       piper.stdin?.end();
     });
 
-    await playWavWindows(wavPath, this.volume());
+    await this.playWavTracked(wavPath, this.volume());
     try {
       unlinkSync(wavPath);
     } catch {
@@ -128,14 +160,44 @@ export class TtsBridge {
   private async speakViaKokoro(text: string): Promise<void> {
     const url = this.cfg.kokoroUrl ?? DEFAULT_KOKORO_URL;
     const fetchFn = this.cfg.fetchImpl ?? fetch;
-    const res = await fetchFn(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text }),
-    });
-    if (!res.ok) {
-      throw new Error(`kokoro POST ${url} → HTTP ${res.status}`);
+    const abort = new AbortController();
+    this.activeAbort = abort;
+    try {
+      const res = await fetchFn(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+        signal: abort.signal,
+      });
+      if (!res.ok) {
+        throw new Error(`kokoro POST ${url} → HTTP ${res.status}`);
+      }
+    } finally {
+      if (this.activeAbort === abort) this.activeAbort = undefined;
     }
+  }
+
+  /** Tracked wrapper around playWavWindows so cancel() can SIGINT the
+   *  PowerShell playback process too — without it the post-synth
+   *  audio would keep playing for the full clip duration even after
+   *  hard-mute. */
+  private playWavTracked(path: string, volume: number): Promise<void> {
+    return new Promise((resolve) => {
+      const ps = spawn(
+        "powershell.exe",
+        ["-NoProfile", "-NonInteractive", "-Command", powershellPlayScript(path, volume)],
+        { windowsHide: true }
+      );
+      this.activeProc = ps;
+      ps.on("close", () => {
+        if (this.activeProc === ps) this.activeProc = undefined;
+        resolve();
+      });
+      ps.on("error", () => {
+        if (this.activeProc === ps) this.activeProc = undefined;
+        resolve();
+      });
+    });
   }
 }
 
@@ -195,10 +257,10 @@ function stripForSpeech(src: string): string {
   return t;
 }
 
-function playWavWindows(path: string, volume: number): Promise<void> {
+function powershellPlayScript(path: string, volume: number): string {
   const safe = path.replace(/'/g, "''");
   const v = volume.toFixed(3);
-  const script =
+  return (
     `Add-Type -AssemblyName PresentationCore;` +
     `$mp = New-Object System.Windows.Media.MediaPlayer;` +
     `$mp.Volume = ${v};` +
@@ -206,14 +268,6 @@ function playWavWindows(path: string, volume: number): Promise<void> {
     `$mp.Play();` +
     `$tries=0; while (-not $mp.NaturalDuration.HasTimeSpan -and $tries -lt 50) { Start-Sleep -Milliseconds 50; $tries++ };` +
     `if ($mp.NaturalDuration.HasTimeSpan) { Start-Sleep -Milliseconds ([int]$mp.NaturalDuration.TimeSpan.TotalMilliseconds + 100) };` +
-    `$mp.Close();`;
-  return new Promise((resolve) => {
-    const ps = spawn(
-      "powershell.exe",
-      ["-NoProfile", "-NonInteractive", "-Command", script],
-      { windowsHide: true }
-    );
-    ps.on("close", () => resolve());
-    ps.on("error", () => resolve());
-  });
+    `$mp.Close();`
+  );
 }
