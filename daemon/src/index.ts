@@ -14,6 +14,8 @@ import { HttpScreenpipeClient } from "./screenpipe.js";
 import { VoteStore } from "./votes.js";
 import { loadPromptDir, loadPersonalities } from "./personalities-loader.js";
 import { loadPersonalityConfigs } from "./personality-config.js";
+import { TurnTelemetry } from "./turn-telemetry.js";
+import { RollingCostRate } from "./cost-rate.js";
 import { join } from "node:path";
 import { existsSync } from "node:fs";
 import { findVoiceDir, spawnVoiceSidecar } from "./voice-sidecar.js";
@@ -137,6 +139,14 @@ const stt = new SttBridge({ exe: whisperExe, model: whisperModel });
 const recorder = new Recorder();
 
 const votes = new VoteStore();
+// Task 13.3: bring up the per-turn telemetry singleton + rolling
+// $/hr observer. The recorder is unwired today (turns aren't being
+// appended yet — that comes when 11.x lands the per-turn write into
+// the conversation loop), so the snapshot is currently always zero.
+// The wire lets the sidebar query as soon as turns start landing
+// without another deploy.
+const turnTelemetry = new TurnTelemetry();
+const costRate = new RollingCostRate({ turnTelemetry });
 const wss = startServer({
   session,
   tts,
@@ -147,6 +157,7 @@ const wss = startServer({
   gatedPersonalities,
   kokoroVoiceFor,
   personalityVoiceConfigs: personalityConfigs,
+  costRate,
 });
 console.log(
   `[buddy-daemon] listening on ws://127.0.0.1:${port} (model=${model}, tts=${tts.describe()}, stt=${stt.describe()})`
