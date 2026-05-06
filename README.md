@@ -138,6 +138,7 @@ node scripts/tune-triggers.mjs --min 10     # ignore triggers with < 10 votes
 | `BUDDY_TTS_VOLUME` | `0.5` | 0.0–1.0. Applied by the Piper backend; Kokoro plays at sidecar default. |
 | `BUDDY_WHISPER_EXE` / `BUDDY_WHISPER_MODEL` | — | whisper.cpp paths for voice input (Ctrl+Alt+V). |
 | `BUDDY_BACKCHANNEL` | `on` | When the conversation loop is `LISTENING` and the user has been speaking >3s, plays a short `voice/backchannels/*.wav` clip (cooldown ≥8s). `off` disables. |
+| `BUDDY_WAKEWORD` | `off` | `off` keeps the daemon open-mic. Set to a phrase (e.g. `"hey buddy"`) to gate LLM forwarding behind it; transcripts pass for 30s after each fire. |
 | `BUDDY_SCREENPIPE_URL` | — (disabled) | When set, OCR'd recent screen activity is added to `EXPLICIT_ASK` triggers when `recent_diff` is empty. |
 
 VS Code settings (Settings → Coding Buddy):
