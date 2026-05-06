@@ -60,7 +60,7 @@ Source spec: `RESEARCH.md` §5.2 (MVP), §5.3 (post-MVP), §5.4 (cost model).
 
 ## Phase 8 — Docs
 
-- [ ] **8.1** Rewrite `README.md` to match real behavior post-Phase 2 and Phase 3: document `BUDDY_TTS_BACKEND` values, the auto-spawn behavior, all hotkeys, and the test commands. Keep "Definition of done" but link each checkbox to its automated test.
+- [x] **8.1** Rewrite `README.md` to match real behavior post-Phase 2 and Phase 3: document `BUDDY_TTS_BACKEND` values, the auto-spawn behavior, all hotkeys, and the test commands. Keep "Definition of done" but link each checkbox to its automated test.
 - [ ] **8.2** Generate `CHANGELOG.md` from git log (Keep-a-Changelog format). Add a CI step or script to refresh it.
 
 ## Phase 9 — Personalities
