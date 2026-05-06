@@ -23,6 +23,8 @@ export class Session {
   private screenpipe?: ScreenpipeClient;
   private personalities: Map<string, string>;
   private personality: string;
+  private shuffle: boolean;
+  private rng: () => number;
 
   constructor(
     private client: AiClient,
@@ -34,6 +36,8 @@ export class Session {
       screenpipe?: ScreenpipeClient;
       personalities?: Map<string, string>;
       defaultPersonality?: string;
+      defaultShuffle?: boolean;
+      rng?: () => number;
     } = {}
   ) {
     this.maxSpokenPerHour = opts.maxSpokenPerHour ?? 2;
@@ -60,12 +64,40 @@ export class Session {
     } else {
       this.personality = "nice";
     }
+    // Shuffle precedence mirrors personality: persisted value beats the
+    // env-driven default. Off by default so the daemon stays
+    // deterministic for users who never opted in.
+    const persistedShuffle = this.memory.getShuffle();
+    this.shuffle = persistedShuffle ?? opts.defaultShuffle ?? false;
+    this.rng = opts.rng ?? Math.random;
     if (!this.prompts.has(this.mode)) {
       throw new Error(`No prompt loaded for default mode "${this.mode}"`);
     }
     // Restore mute state across daemon restarts. Stale (already-expired)
     // values are filtered out by MemoryStore.getMutedUntil itself.
     this.mutedUntil = this.memory.getMutedUntil();
+  }
+
+  isShuffle(): boolean {
+    return this.shuffle;
+  }
+
+  /** Toggle random-personality mode. Persisted so a daemon restart
+   *  preserves the user's choice, matching the personality contract. */
+  setShuffle(value: boolean): void {
+    this.shuffle = value;
+    this.memory.setShuffle(value);
+  }
+
+  /** Picks a personality from the loaded map, excluding the currently
+   *  active one. Returns the current personality unchanged when fewer
+   *  than two are loaded — there's nothing to switch to. */
+  private pickRandomPersonality(): string {
+    const all = this.listPersonalities();
+    const others = all.filter((p) => p !== this.personality);
+    if (others.length === 0) return this.personality;
+    const idx = Math.floor(this.rng() * others.length);
+    return others[idx] ?? this.personality;
   }
 
   listPersonalities(): string[] {
@@ -181,6 +213,13 @@ export class Session {
       session_summary: this.summary,
       recent_chat,
     };
+    // Random-personality mode rotates *per trigger*, never repeating
+    // the previous overlay. This is a transient assignment — the
+    // user's seed personality stays persisted, only the runtime
+    // overlay changes.
+    if (this.shuffle) {
+      this.personality = this.pickRandomPersonality();
+    }
     const reply = await this.client.ask(
       this.buildSystemBlocks(),
       this.summary,
