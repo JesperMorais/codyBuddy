@@ -41,6 +41,7 @@
 import { EventEmitter } from "node:events";
 import type { BargeInController } from "./barge-in.js";
 import { SentenceBuffer } from "./sentence-buffer.js";
+import type { AutoQuietGate, QuietState } from "./auto-quiet.js";
 
 export type ConversationState =
   | "IDLE"
@@ -97,6 +98,16 @@ export interface ConversationLoopDeps {
   awaitPlaybackDone?: () => Promise<void>;
   /** Optional logger; defaults to console.log. */
   log?: (line: string) => void;
+  /**
+   * Optional auto-quiet gate (Task 13.1). When configured, the loop
+   * consults it before forwarding transcripts to the LLM:
+   *   - ACTIVE → forward as usual
+   *   - QUIET  → drop unless the gate says the transcript passed
+   *              the wake-word / length filter
+   * Editor-side activity (handleTrigger) is registered separately
+   * via gate.noteActivity() — the loop only handles the speech path.
+   */
+  quietGate?: AutoQuietGate;
 }
 
 export class ConversationLoop {
@@ -169,10 +180,12 @@ export class ConversationLoop {
   /** VAD: the user just stopped talking. Drives LISTENING → THINKING
    *  once the transcript arrives. We don't transition here directly
    *  because the STT bridge promotes its last-partial up to 400ms
-   *  later (per Task 10.2's contract). */
+   *  later (per Task 10.2's contract). The auto-quiet gate counts
+   *  this as a sign of life — Task 13.1. */
   speechEnd(): void {
-    // No-op; the STT path is responsible for delivering
-    // transcript() when it has a final.
+    this.deps.quietGate?.noteActivity();
+    // No state transition; the STT path delivers transcript() when
+    // it has a final.
   }
 
   /** STT delivered a final transcript. Branches:
@@ -180,7 +193,8 @@ export class ConversationLoop {
    *   - has text → THINKING + start the LLM stream
    *   - state is INTERRUPTED → drop the transcript; the user is
    *     barging-in mid-utterance, the new speech.start has already
-   *     queued the cleanup. */
+   *     queued the cleanup.
+   *   - quietGate says drop → IDLE (no LLM call) — Task 13.1. */
   async transcript(text: string): Promise<void> {
     if (this.state !== "LISTENING") {
       this.log(`[loop] transcript ignored in state=${this.state}`);
@@ -192,13 +206,38 @@ export class ConversationLoop {
       this.maybeConsumeOpportunity();
       return;
     }
+    // Auto-quiet gate (Task 13.1): when QUIET, the gate's filter
+    // decides whether this transcript reaches the LLM at all. If
+    // dropped, we go straight back to IDLE without touching the
+    // expensive tier — no Sonnet, no Kokoro/XTTS, no telemetry-
+    // visible turn. Editor activity is tracked separately by the
+    // host (Session, etc) via gate.noteActivity().
+    if (this.deps.quietGate) {
+      const decision = this.deps.quietGate.shouldForwardTranscript(trimmed);
+      if (decision.dropped) {
+        this.log(
+          `[loop] transcript dropped by quiet gate: ${decision.reason ?? "unknown"}`
+        );
+        this.transition("IDLE");
+        this.maybeConsumeOpportunity();
+        return;
+      }
+    }
     this.pendingTranscript = trimmed;
     await this.runUtterance({ trigger: "EXPLICIT_ASK", payload: { user_question: trimmed } });
   }
 
+  /** Resolve the active quiet state, or `null` when no gate is
+   *  wired. Test seam + telemetry hook. */
+  quietState(): QuietState | null {
+    return this.deps.quietGate?.state() ?? null;
+  }
+
   /** Editor-side trigger. Queued and consumed only when IDLE so we
-   *  never preempt a live voice turn. */
+   *  never preempt a live voice turn. Editor activity also resets
+   *  the auto-quiet gate (Task 13.1). */
   enqueueOpportunity(opp: Opportunity): void {
+    this.deps.quietGate?.noteActivity();
     this.opportunities.push(opp);
     this.maybeConsumeOpportunity();
   }
