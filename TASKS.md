@@ -67,7 +67,7 @@ Source spec: `RESEARCH.md` §5.2 (MVP), §5.3 (post-MVP), §5.4 (cost model).
 
 Personality is a tone overlay orthogonal to mode (global, not per-mode). Mode prompts keep all hard rules; personality only governs voice/vocabulary. Default `nice`. NSFW is explicitly NOT supported on the Anthropic path — see 9.9.
 
-- [ ] **9.1** Add `daemon/prompts/personalities/{nice,dry,rude,drill_sergeant,passive_aggressive,pirate,shakespearean}.md`. Each ~20-40 lines: tone, vocab cues, 2-3 example phrasings, explicit "obey all rules in the role prompt; only change *how* you say things" clause. `nice` is the neutral baseline.
+- [x] **9.1** Add `daemon/prompts/personalities/{nice,dry,rude,drill_sergeant,passive_aggressive,pirate,shakespearean}.md`. Each ~20-40 lines: tone, vocab cues, 2-3 example phrasings, explicit "obey all rules in the role prompt; only change *how* you say things" clause. `nice` is the neutral baseline.
 - [ ] **9.2** Loader: scan `daemon/prompts/personalities/` in `daemon/src/index.ts` into a second `Map<string,string>`. Pass to `Session` constructor alongside existing mode prompts.
 - [ ] **9.3** Extend `Session`: add `personality` field, `getPersonality/setPersonality/listPersonalities`. Replace the single `systemPrompt: string` with `systemBlocks: string[]` returning `[modePrompt, personalityOverlay]` (overlay omitted when `nice`). Update `AnthropicClient.ask` signature to accept ordered system text blocks; each block keeps its own `cache_control`. Initial value from `BUDDY_PERSONALITY` env, default `nice`.
 - [ ] **9.4** WS protocol: add `setPersonality` / `getPersonality` message types. Include `personality` and `availablePersonalities` in the existing `modeSet` ack payload so the sidebar gets both dimensions in one message.
