@@ -1,5 +1,6 @@
 import type { AiClient, BuddyReply } from "./anthropic.js";
 import { MemoryStore } from "./memory.js";
+import { type ScreenpipeClient, summarizeOcr } from "./screenpipe.js";
 
 interface EventLogEntry {
   ts: number;
@@ -19,15 +20,22 @@ export class Session {
 
   private mode: string;
   private memory: MemoryStore;
+  private screenpipe?: ScreenpipeClient;
 
   constructor(
     private client: AiClient,
     private prompts: Map<string, string>,
-    opts: { maxSpokenPerHour?: number; defaultMode?: string; memory?: MemoryStore } = {}
+    opts: {
+      maxSpokenPerHour?: number;
+      defaultMode?: string;
+      memory?: MemoryStore;
+      screenpipe?: ScreenpipeClient;
+    } = {}
   ) {
     this.maxSpokenPerHour = opts.maxSpokenPerHour ?? 2;
     this.mode = opts.defaultMode ?? "tutor";
     this.memory = opts.memory ?? new MemoryStore();
+    this.screenpipe = opts.screenpipe;
     if (!this.prompts.has(this.mode)) {
       throw new Error(`No prompt loaded for default mode "${this.mode}"`);
     }
@@ -86,6 +94,12 @@ export class Session {
         return { mode: "no_op", text: "", wants_followup: false };
       }
     }
+
+    // Optional Screenpipe context: only on EXPLICIT_ASK and only when the
+    // editor signal is empty (user has been outside the IDE). Failures
+    // here must never break the live trigger path — the buddy still
+    // proceeds with whatever editor context it has.
+    payload = await this.maybeAddScreenContext(trigger, payload);
 
     this.rolloverHourBucket();
 
@@ -182,6 +196,25 @@ export class Session {
     if (Date.now() - this.hourBucketStart > 60 * 60_000) {
       this.hourBucketStart = Date.now();
       this.spokenInBucket = 0;
+    }
+  }
+
+  private async maybeAddScreenContext(
+    trigger: string,
+    payload: object
+  ): Promise<object> {
+    if (!this.screenpipe || trigger !== "EXPLICIT_ASK") return payload;
+    const p = payload as { recent_diff?: string };
+    const diff = (p.recent_diff ?? "").trim();
+    if (diff.length > 0) return payload;
+    try {
+      const entries = await this.screenpipe.queryRecent(60);
+      if (entries.length === 0) return payload;
+      const summary = summarizeOcr(entries);
+      return { ...payload, screen_context: summary };
+    } catch (err) {
+      console.error("[screenpipe] queryRecent failed:", err);
+      return payload;
     }
   }
 

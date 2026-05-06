@@ -9,6 +9,7 @@ import { SttBridge } from "./stt.js";
 import { Recorder } from "./recorder.js";
 import { parseTtsBackend } from "./config.js";
 import { startServer } from "./server.js";
+import { HttpScreenpipeClient } from "./screenpipe.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -45,7 +46,14 @@ for (const f of readdirSync(promptsDir)) {
 console.log(`[buddy-daemon] loaded modes: ${[...prompts.keys()].join(", ")}`);
 
 const client = new AnthropicClient(apiKey, model);
-const session = new Session(client, prompts);
+const screenpipeUrl = process.env.BUDDY_SCREENPIPE_URL;
+const screenpipe = screenpipeUrl
+  ? new HttpScreenpipeClient({ baseUrl: screenpipeUrl })
+  : undefined;
+if (screenpipe) {
+  console.log(`[buddy-daemon] Screenpipe enabled at ${screenpipeUrl}`);
+}
+const session = new Session(client, prompts, { screenpipe });
 const tts = new TtsBridge({
   backend: ttsBackend,
   piperExe,
