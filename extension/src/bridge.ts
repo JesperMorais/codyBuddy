@@ -29,6 +29,23 @@ type RecordStartedHandler = (info: { ok: boolean; error?: string }) => void;
 type HealthHandler = (info: { up: boolean }) => void;
 type DemoModeHandler = (info: { active: boolean }) => void;
 
+export interface AudioDevice {
+  id: string;
+  name: string;
+  isDefault?: boolean;
+}
+export interface AudioDeviceList {
+  input: AudioDevice[];
+  output: AudioDevice[];
+}
+type AudioDevicesResolver = (info: {
+  requestId: string;
+  ok: boolean;
+  input?: AudioDevice[];
+  output?: AudioDevice[];
+  error?: string;
+}) => void;
+
 const PING_TIMEOUT_MS = 3_000;
 
 export class DaemonBridge {
@@ -44,6 +61,7 @@ export class DaemonBridge {
   private recordStartedHandler?: RecordStartedHandler;
   private healthHandler?: HealthHandler;
   private demoModeHandler?: DemoModeHandler;
+  private audioDeviceWaiters = new Map<string, AudioDevicesResolver>();
   private healthUp = false;
   private disposed = false;
 
@@ -94,6 +112,29 @@ export class DaemonBridge {
   /** Subscribe to demo-mode toggles from the daemon (Task 15.4). */
   onDemoMode(h: DemoModeHandler): void {
     this.demoModeHandler = h;
+  }
+
+  /** Ask the daemon for its audio device list (Task 15.8).
+   *  Resolves with the lists or an error after the request times
+   *  out. The request is correlated by requestId so concurrent
+   *  callers don't tangle. */
+  getAudioDevices(timeoutMs = 3_000): Promise<AudioDeviceList> {
+    const requestId = `audio-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.audioDeviceWaiters.delete(requestId);
+        reject(new Error(`getAudioDevices timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+      this.audioDeviceWaiters.set(requestId, (info) => {
+        clearTimeout(timer);
+        if (!info.ok) {
+          reject(new Error(info.error ?? "audio device list failed"));
+          return;
+        }
+        resolve({ input: info.input ?? [], output: info.output ?? [] });
+      });
+      this.send({ type: "getAudioDevices", requestId });
+    });
   }
 
   setVolume(v: number): void {
@@ -238,6 +279,22 @@ export class DaemonBridge {
           // Task 15.4: daemon tells the sidebar whether to render
           // the demo-mode watermark.
           this.demoModeHandler({ active: !!msg.active });
+        } else if (msg.type === "audioDevices") {
+          // Task 15.8: response to a getAudioDevices request.
+          const requestId = String(msg.requestId ?? "");
+          const waiter = this.audioDeviceWaiters.get(requestId);
+          if (waiter) {
+            this.audioDeviceWaiters.delete(requestId);
+            waiter({
+              requestId,
+              ok: !!msg.ok,
+              input: Array.isArray(msg.input) ? (msg.input as AudioDevice[]) : [],
+              output: Array.isArray(msg.output)
+                ? (msg.output as AudioDevice[])
+                : [],
+              error: msg.error ? String(msg.error) : undefined,
+            });
+          }
         } else if (msg.type === "recordStarted" && this.recordStartedHandler) {
           this.recordStartedHandler({
             ok: !!msg.ok,

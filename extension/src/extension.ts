@@ -10,6 +10,26 @@ let muteTimer: NodeJS.Timeout | undefined;
 const fileSnapshots = new Map<string, string>();
 let spawnedDaemon: SpawnedDaemon | undefined;
 
+/** Task 15.8: present a quickpick of audio devices and return the
+ *  chosen device id. Empty list → fall back to "system default" so
+ *  users can wire up the .env even before the daemon ships per-OS
+ *  enumeration. Returns undefined when the user dismissed the picker. */
+async function pickDevice(
+  placeHolder: string,
+  devices: { id: string; name: string; isDefault?: boolean }[]
+): Promise<string | undefined> {
+  const items = [
+    { label: "system default", description: "use OS-default device", id: "default" },
+    ...devices.map((d) => ({
+      label: d.isDefault ? `${d.name} (default)` : d.name,
+      description: d.id,
+      id: d.id,
+    })),
+  ];
+  const picked = await vscode.window.showQuickPick(items, { placeHolder });
+  return picked?.id;
+}
+
 export function activate(ctx: vscode.ExtensionContext): void {
   const cfg = vscode.workspace.getConfiguration("codingBuddy");
   const port = cfg.get<number>("daemonPort", 31415);
@@ -373,6 +393,62 @@ export function activate(ctx: vscode.ExtensionContext): void {
       }
       sidebar.testVoice();
     })
+  );
+
+  ctx.subscriptions.push(
+    vscode.commands.registerCommand(
+      "coding-buddy.selectAudioDevices",
+      async () => {
+        // Task 15.8: ask the daemon for its device list, prompt
+        // the user with two quickpicks, then write the chosen
+        // device IDs to .env. The .env update is the source of
+        // truth — a daemon restart picks them up via env.
+        let list;
+        try {
+          list = await bridge.getAudioDevices(3_000);
+        } catch (err) {
+          void vscode.window.showErrorMessage(
+            `Coding Buddy: getAudioDevices failed: ${
+              err instanceof Error ? err.message : String(err)
+            }`
+          );
+          return;
+        }
+        const inputId = await pickDevice(
+          "Pick an audio INPUT device (microphone)",
+          list.input
+        );
+        if (inputId === undefined) return;
+        const outputId = await pickDevice(
+          "Pick an audio OUTPUT device (speakers)",
+          list.output
+        );
+        if (outputId === undefined) return;
+
+        // Resolve .env in the workspace root. The daemon's setup
+        // script writes it there; the auto-spawn daemon reads it
+        // from the same place.
+        const wsFolders = vscode.workspace.workspaceFolders;
+        if (!wsFolders || wsFolders.length === 0) {
+          void vscode.window.showErrorMessage(
+            "Coding Buddy: open a folder before choosing audio devices."
+          );
+          return;
+        }
+        const envPath = require("node:path").join(
+          wsFolders[0].uri.fsPath,
+          ".env"
+        );
+        const { updateEnvFile } = await import("./env-writer.js");
+        updateEnvFile(envPath, {
+          BUDDY_AUDIO_INPUT_ID: inputId,
+          BUDDY_AUDIO_OUTPUT_ID: outputId,
+        });
+        void vscode.window.showInformationMessage(
+          `Coding Buddy: audio devices saved to .env. Restart the daemon to apply.`
+        );
+      }
+    )
   );
 
   ctx.subscriptions.push(
