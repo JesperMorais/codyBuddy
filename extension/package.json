@@ -5,6 +5,16 @@
   "version": "0.1.0",
   "publisher": "monitor-teacher",
   "private": true,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/JesperMorais/codyBuddy.git"
+  },
+  "categories": [
+    "Education",
+    "AI",
+    "Other"
+  ],
   "engines": {
     "vscode": "^1.95.0"
   },
@@ -138,7 +148,8 @@
     "watch": "tsc -p . -w",
     "typecheck": "tsc -p . --noEmit",
     "pretest": "tsc -p .",
-    "test": "node --test"
+    "test": "node --test",
+    "build:vsix": "tsc -p . && node scripts/build-vsix.mjs"
   },
   "dependencies": {
     "ws": "^8.18.0"

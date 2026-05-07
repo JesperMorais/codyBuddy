@@ -1,0 +1,28 @@
+# Files excluded from the .vsix package — shipped only what the
+# extension host needs at runtime.
+
+# Source / dev-time
+src/**
+test/**
+out/**/*.test.*
+**/*.map
+**/*.test.mjs
+**/*.test.ts
+.vscode/**
+.vscode-test/**
+tsconfig.json
+node_modules/.cache/**
+# Build-time helper — runs vsce, doesn't ship to users.
+scripts/**
+
+# Repo bookkeeping
+.gitignore
+.gitattributes
+.github/**
+*.log
+
+# Don't ship the workspace root README; the extension's own
+# README.md (if added later) is what users see in the marketplace.
+# The vsix already excludes ../README.md — this is a defensive
+# entry in case someone copies it in.
+../README.md
