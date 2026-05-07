@@ -10,6 +10,9 @@ the meantime.
 | `sidebar-idle.png`               | Sidebar at idle. Red mic dot in the input row (mic permission not yet granted), status pill at the top reads **Ready** with the blue swatch. Mode dropdown set to `tutor`, Personality `nice`. |
 | `sidebar-listening.png`          | After pressing <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>V</kbd>: mic dot turns green and pulses, status pill reads **I'm listening…** with the green pulsing swatch. The transcript area is empty (or contains the user's prior turns). |
 | `sidebar-speaking.png`           | Buddy is mid-reply: status pill reads **Buddy is speaking…** with the purple pulsing swatch. The latest assistant turn appears in the transcript above the input. |
+| `mic/win11-mic-settings.png`     | Windows 11 **Settings → Privacy & Security → Microphone**. Both toggles ("Microphone access" and "Let desktop apps access your microphone") shown ON. Capture the whole panel down to the app list so the user sees the toggles in context. |
+| `mic/macos-mic-settings.png`     | macOS **System Settings → Privacy & Security → Microphone**. Show the app list with **Visual Studio Code** toggled on. Capture at least one extra app in the list for orientation. |
+| `mic/linux-pavucontrol-recording.png` | `pavucontrol` window with the **Recording** tab active. Show the daemon's whisper subprocess as a row, with the input level meter mid-frame (mic active and speaking). |
 
 ## How to capture them
 

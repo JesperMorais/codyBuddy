@@ -69,12 +69,47 @@ The five most common ways onboarding fails. If your symptom isn't here, run `pnp
 
 ### 1. "We need permission to access the microphone"
 
-Symptom: pressing <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>V</kbd> does nothing, or the sidebar stays on "Ready" instead of flipping to "I'm listening…".
+The most common silent failure mode. Pressing <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>V</kbd> does nothing — no error, no audio, the sidebar stays on "Ready" instead of flipping to "I'm listening…". The OS denied mic access without the daemon ever being asked.
 
-Fix:
-- **Windows 11**: Settings → Privacy & Security → Microphone → "Microphone access" ON, and "Let desktop apps access your microphone" ON. Restart VS Code.
-- **macOS**: System Settings → Privacy & Security → Microphone → tick **Visual Studio Code** (or Cursor / Code Insiders, whichever you launched). macOS-specific gotcha: VS Code may need to be granted access once per signed binary — re-quitting and relaunching usually re-prompts.
-- **Linux (PulseAudio / PipeWire)**: `pavucontrol` → Recording tab — confirm the daemon's STT process appears with non-muted input.
+Walk through your OS below.
+
+#### Windows 11
+
+1. Open **Settings** → **Privacy & Security** → **Microphone**.
+2. Set **Microphone access** to **On** (top of the page).
+3. Scroll down and set **Let desktop apps access your microphone** to **On**.
+4. Restart VS Code (close every window, then reopen — Windows checks the policy on launch).
+
+![Windows 11 Settings → Privacy & Security → Microphone showing both toggles On.](docs/screenshots/mic/win11-mic-settings.png)
+
+If the toggles are already on but the mic still doesn't engage, try a different USB port for the mic — Windows occasionally remembers per-device denials.
+
+#### macOS
+
+1. Open **System Settings** → **Privacy & Security** → **Microphone**.
+2. Find **Visual Studio Code** (or **Cursor** / **Code - Insiders** / **VSCodium**, whichever app you launched) in the list and tick the toggle.
+3. **macOS-specific gotcha**: macOS scopes mic permission to the *signed binary*, not the user. Updating VS Code, switching to Insiders, or installing a new build invalidates the prior grant — you'll see VS Code disappear from the list and need to re-tick on next launch.
+   - **Workaround**: relaunching VS Code re-prompts and the dialog re-adds the entry. If the dialog doesn't appear, run `tccutil reset Microphone com.microsoft.VSCode` in a Terminal (substitute the bundle id for Cursor / Code Insiders / VSCodium) and relaunch.
+
+![macOS System Settings → Privacy & Security → Microphone with VS Code toggled on.](docs/screenshots/mic/macos-mic-settings.png)
+
+#### Linux (PulseAudio / PipeWire)
+
+Most modern distros ship **PipeWire** with a PulseAudio compatibility layer (`pipewire-pulse`). Both layers expose mic state through `pavucontrol`.
+
+1. Install if missing: `sudo apt install pavucontrol` (Debian/Ubuntu) / `sudo dnf install pavucontrol` (Fedora) / `sudo pacman -S pavucontrol` (Arch).
+2. Run `pavucontrol`. Open the **Recording** tab.
+3. Press <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>V</kbd> in VS Code to start a recording. The daemon's whisper subprocess should appear in the Recording tab.
+4. Confirm the input source isn't muted (no red strikethrough on the mic icon) and the volume bar moves when you speak.
+
+![pavucontrol Recording tab with the daemon visible and live volume movement.](docs/screenshots/mic/linux-pavucontrol-recording.png)
+
+PipeWire-specific debug:
+- `pw-cli list-objects | grep -i source` — list active audio sources. The mic name should appear.
+- `wpctl status` (`wireplumber`) — quick policy summary; check that the default source isn't `(none)`.
+- If only PulseAudio is installed (older systems), the same `pavucontrol` UI works against the legacy server.
+
+If the daemon never appears in the Recording tab, the OS isn't even routing mic data to it. Most often this means `pipewire` / `pulseaudio` isn't running for your user session — `systemctl --user status pipewire pipewire-pulse` (PipeWire) or `systemctl --user status pulseaudio` (legacy) tells you which service is down.
 
 ### 2. "GPU not found" (XTTS personality silent or slow)
 
