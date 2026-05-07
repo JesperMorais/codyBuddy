@@ -11,6 +11,15 @@ export interface UsageLike {
   cache_creation_input_tokens?: number;
 }
 
+/** A `(model, usage)` pair surfaced by clients/classifiers to consumers
+ *  that want to record per-turn telemetry — Task 16.1.2. The model id
+ *  is included so the consumer (TurnTelemetry / RollingCostRate) can
+ *  apply the right per-million-token pricing without guessing. */
+export interface UsageRecord {
+  model: string;
+  usage: UsageLike;
+}
+
 export interface TelemetryEntry {
   ts: number;
   method: string;

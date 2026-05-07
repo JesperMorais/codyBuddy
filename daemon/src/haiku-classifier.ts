@@ -20,7 +20,7 @@
 // is paying Sonnet rates we'd have paid pre-router anyway.
 
 import Anthropic from "@anthropic-ai/sdk";
-import { Telemetry, type UsageLike } from "./telemetry.js";
+import { Telemetry, type UsageLike, type UsageRecord } from "./telemetry.js";
 import type { HaikuClassifier, HaikuVerdict } from "./tiered-router.js";
 
 const DEFAULT_HAIKU_MODEL = "claude-haiku-4-5-20251001";
@@ -74,6 +74,10 @@ export class AnthropicHaikuClassifier implements HaikuClassifier {
   private model: string;
   private telemetry: Telemetry;
   private log: (line: string) => void;
+  /** Last classify() call's usage. Cleared at the start of every
+   *  call so getLastUsage() reflects the most recent gate verdict —
+   *  Task 16.1.2. */
+  private lastClassifyUsage?: UsageRecord;
 
   constructor(opts: AnthropicHaikuClassifierOptions = {}) {
     if (opts.client) {
@@ -95,6 +99,9 @@ export class AnthropicHaikuClassifier implements HaikuClassifier {
     payload: object,
     systemBlocks: string[]
   ): Promise<HaikuVerdict> {
+    // Reset per-call so an aborted/erroring classify doesn't leak
+    // last turn's usage into the next read.
+    this.lastClassifyUsage = undefined;
     const blocks = systemBlocks
       .filter((b) => b && b.length > 0)
       .map((text) => ({
@@ -116,11 +123,9 @@ export class AnthropicHaikuClassifier implements HaikuClassifier {
           },
         ],
       });
-      this.telemetry.record(
-        "classify",
-        this.model,
-        (res.usage ?? {}) as UsageLike
-      );
+      const usage = (res.usage ?? {}) as UsageLike;
+      this.telemetry.record("classify", this.model, usage);
+      this.lastClassifyUsage = { model: this.model, usage };
       const block = res.content.find((b) => b.type === "text");
       raw = block && typeof block.text === "string" ? block.text.trim() : "";
     } catch (err) {
@@ -133,6 +138,14 @@ export class AnthropicHaikuClassifier implements HaikuClassifier {
     }
 
     return parseVerdict(raw, this.log);
+  }
+
+  /** Returns the (model, usage) for the most recent classify() call,
+   *  or undefined if none has completed (or if the last call threw
+   *  before usage was captured). The TieredRouter consumes this to
+   *  surface Haiku token counts to per-turn telemetry — Task 16.1.2. */
+  getLastUsage(): UsageRecord | undefined {
+    return this.lastClassifyUsage;
   }
 }
 

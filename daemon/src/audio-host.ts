@@ -29,6 +29,7 @@ import type {
   RouteOutcome,
 } from "./tiered-router.js";
 import type { TurnTelemetry } from "./turn-telemetry.js";
+import type { UsageRecord } from "./telemetry.js";
 
 /** Narrow shape of VadBridge that the host actually uses. Tests
  *  pass a tiny fake; production passes the real bridge. */
@@ -62,6 +63,12 @@ export interface RouterWithOutcome {
     signal?: AbortSignal
   ): AsyncIterable<string>;
   getLastOutcome(): RouteOutcome | undefined;
+  /** Optional — see TieredRouter.getLastTokenUsage. When absent or
+   *  returning empty, the host writes a turn entry with zero token
+   *  counts (the 16.1 MVP behaviour). When present, haiku/sonnet
+   *  model + usage are surfaced into the per-turn telemetry entry —
+   *  Task 16.1.2. */
+  getLastTokenUsage?(): { haiku?: UsageRecord; sonnet?: UsageRecord };
 }
 
 export interface AudioHostDeps {
@@ -172,10 +179,20 @@ export class AudioHost {
     const endToEndMs = Date.now() - this.turnStartedAt;
     this.turnStartedAt = 0;
     const outcome = this.deps.router.getLastOutcome();
+    // Task 16.1.2: pull haiku/sonnet usage from the router so the
+    // turn entry carries accurate token counts and TurnTelemetry can
+    // compute a real usd_estimate (instead of always-zero, which is
+    // what the 16.1 MVP shipped). Routers without the optional
+    // getLastTokenUsage hook degrade to zero counts cleanly.
+    const usage = this.deps.router.getLastTokenUsage?.() ?? {};
     try {
       this.deps.turnTelemetry.record({
         routerReason: outcome?.reason ?? "",
         endToEndMs,
+        haikuModel: usage.haiku?.model,
+        haikuUsage: usage.haiku?.usage,
+        sonnetModel: usage.sonnet?.model,
+        sonnetUsage: usage.sonnet?.usage,
         wakeWord: this.deps.getWakeWord(),
         personality: this.deps.getPersonality(),
         mode: this.deps.getMode(),
