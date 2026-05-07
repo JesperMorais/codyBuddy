@@ -4,11 +4,113 @@ import { TriggerEngine, TriggerEvent } from "./triggers";
 import { isDeniedFile, scrubSecrets, makeMiniDiff } from "./redactor";
 import { BuddySidebarProvider } from "./ui/sidebar";
 import { findDaemonScript, probeDaemonPort, spawnDaemon, SpawnedDaemon } from "./daemon-spawn";
+import {
+  applyOnboardingResult,
+  isValidApiKey,
+  ONBOARDING_DISMISSED_KEY,
+  shouldShowOnboarding,
+} from "./onboarding";
 
 let muted = false;
 let muteTimer: NodeJS.Timeout | undefined;
 const fileSnapshots = new Map<string, string>();
 let spawnedDaemon: SpawnedDaemon | undefined;
+
+/** Task 15.12: drive the four-step first-run wizard via vscode UI.
+ *  Returns the completed result, or undefined when the user
+ *  dismissed any step. Pure handlers (`applyOnboardingResult`,
+ *  `isValidApiKey`) are in `./onboarding` and are unit-tested
+ *  separately — this function is the unavoidable vscode wrapper. */
+async function runOnboardingWizard(): Promise<
+  | undefined
+  | { apiKey: string; personality: string; wakeWord: string }
+> {
+  // Step 1: API key.
+  const apiKey = await vscode.window.showInputBox({
+    title: "Coding Buddy setup (1/4) — paste your Anthropic API key",
+    placeHolder: "sk-ant-...",
+    password: true,
+    ignoreFocusOut: true,
+    validateInput: (v) =>
+      isValidApiKey(v)
+        ? undefined
+        : "expected an Anthropic key starting with `sk-ant-`",
+  });
+  if (!apiKey) return undefined;
+
+  // Step 2: personality.
+  const personality = await vscode.window.showQuickPick(
+    [
+      { label: "nice", description: "neutral baseline (recommended)" },
+      { label: "dry", description: "deadpan, terse" },
+      { label: "rude", description: "blunt, no softeners" },
+      { label: "drill_sergeant", description: "imperative, high-tempo" },
+      { label: "passive_aggressive", description: "polite surface, pointed subtext" },
+      { label: "pirate", description: "pirate cadence" },
+      { label: "shakespearean", description: "early-modern English" },
+      { label: "random", description: "shuffle on every trigger" },
+    ],
+    {
+      title: "Coding Buddy setup (2/4) — pick a personality",
+      ignoreFocusOut: true,
+    }
+  );
+  if (!personality) return undefined;
+
+  // Step 3: wake word.
+  const wakeChoice = await vscode.window.showQuickPick(
+    [
+      { label: "off", description: "open-mic always-listening (default)" },
+      { label: "hey buddy", description: "speak `hey buddy` to wake the LLM tier" },
+      { label: "custom", description: "type your own phrase next" },
+    ],
+    {
+      title: "Coding Buddy setup (3/4) — pick a wake-word mode",
+      ignoreFocusOut: true,
+    }
+  );
+  if (!wakeChoice) return undefined;
+  let wakeWord = wakeChoice.label;
+  if (wakeChoice.label === "custom") {
+    const custom = await vscode.window.showInputBox({
+      title: "Coding Buddy setup (3/4) — custom wake phrase",
+      placeHolder: "e.g. `hey jane`",
+      ignoreFocusOut: true,
+      validateInput: (v) =>
+        v && v.trim().length >= 3
+          ? undefined
+          : "wake phrase needs to be at least 3 chars",
+    });
+    if (!custom) return undefined;
+    wakeWord = custom.trim();
+  }
+
+  // Step 4: optional mic test (informational — not blocking).
+  await vscode.window.showInformationMessage(
+    "Coding Buddy setup (4/4): press Ctrl+Alt+V in the editor to test the mic.",
+    "Got it"
+  );
+
+  return { apiKey: apiKey.trim(), personality: personality.label, wakeWord };
+}
+
+/** Wraps the wizard with disk-write + workspace-state plumbing. */
+async function runOnboarding(
+  ctx: vscode.ExtensionContext,
+  envPath: string
+): Promise<void> {
+  const result = await runOnboardingWizard();
+  if (!result) {
+    // Stash the dismissal so we don't pester them every activate.
+    await ctx.workspaceState.update(ONBOARDING_DISMISSED_KEY, true);
+    return;
+  }
+  applyOnboardingResult(envPath, result);
+  await ctx.workspaceState.update(ONBOARDING_DISMISSED_KEY, true);
+  void vscode.window.showInformationMessage(
+    `Coding Buddy: setup complete. Saved to ${envPath}.`
+  );
+}
 
 /** Task 15.8: present a quickpick of audio devices and return the
  *  chosen device id. Empty list → fall back to "system default" so
@@ -41,6 +143,48 @@ export function activate(ctx: vscode.ExtensionContext): void {
 
   const output = vscode.window.createOutputChannel("Coding Buddy");
   ctx.subscriptions.push(output);
+
+  // Task 15.12: first-run wizard. Skip when there's no workspace
+  // (no place to write .env), when the user already dismissed it
+  // this workspace, or when .env is already filled in. Run it
+  // async so activation isn't blocked.
+  const wsFolders = vscode.workspace.workspaceFolders;
+  if (wsFolders && wsFolders.length > 0) {
+    const envPath = require("node:path").join(
+      wsFolders[0].uri.fsPath,
+      ".env"
+    );
+    const dismissed = ctx.workspaceState.get<boolean>(
+      ONBOARDING_DISMISSED_KEY,
+      false
+    );
+    if (!dismissed && shouldShowOnboarding(envPath)) {
+      void runOnboarding(ctx, envPath);
+    }
+  }
+
+  ctx.subscriptions.push(
+    vscode.commands.registerCommand(
+      "coding-buddy.runOnboarding",
+      async () => {
+        // Manual re-run — clear the dismissal flag and the
+        // wizard is unconditional (replaces existing values).
+        const folders = vscode.workspace.workspaceFolders;
+        if (!folders || folders.length === 0) {
+          void vscode.window.showErrorMessage(
+            "Coding Buddy: open a folder before running setup."
+          );
+          return;
+        }
+        const envPath = require("node:path").join(
+          folders[0].uri.fsPath,
+          ".env"
+        );
+        await ctx.workspaceState.update(ONBOARDING_DISMISSED_KEY, false);
+        await runOnboarding(ctx, envPath);
+      }
+    )
+  );
 
   if (autoSpawnDaemon) {
     void (async () => {
