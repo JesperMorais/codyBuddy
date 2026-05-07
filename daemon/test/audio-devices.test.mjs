@@ -14,8 +14,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { WebSocket } from "ws";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const { enumerateAudioDevices } = await import("../dist/audio-devices.js");
 const { startServer } = await import("../dist/server.js");
@@ -27,7 +30,7 @@ const { loadPromptDir, loadPersonalities } = await import(
 );
 const { FakeAnthropicClient } = await import("./fakes.mjs");
 
-const promptsDir = join(import.meta.dirname, "..", "prompts");
+const promptsDir = join(__dirname, "..", "prompts");
 
 // --- (a) module unit ---------------------------------------------
 
