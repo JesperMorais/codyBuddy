@@ -41,7 +41,7 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import { createHash } from "node:crypto";
 import { request as httpsRequest } from "node:https";
 import { request as httpRequest } from "node:http";
-import { URL } from "node:url";
+import { URL, pathToFileURL } from "node:url";
 
 /** "TBD-fill-in-when-downloading" matches; any other prefix that
  *  starts with "TBD" also matches (defensive). */
@@ -299,6 +299,13 @@ async function main() {
 }
 
 // Only run main() when invoked as the CLI entry point.
-if (import.meta.url === `file://${process.argv[1]}`) {
+//
+// Using `file://${process.argv[1]}` directly fails when the path contains
+// a space, accented char, or any percent-encoded character: `import.meta.url`
+// is a percent-encoded URL ("file:///Users/Jane%20Doe/...") while
+// `process.argv[1]` is the raw filesystem path ("/Users/Jane Doe/..."), so
+// the strict-equality check silently turns the script into a no-op (#131).
+// `pathToFileURL` performs the same percent-encoding `import.meta.url` uses.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main();
 }

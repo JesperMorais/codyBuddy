@@ -12,6 +12,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  copyFileSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -20,7 +22,9 @@ import {
   statSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { spawnSync } from "node:child_process";
 import { createServer } from "node:http";
 import { createHash } from "node:crypto";
 
@@ -382,6 +386,48 @@ test("16.3.1 (i) missing manifest is a no-op (chat-only install path)", async ()
     assert.equal(summary.total, 0);
     assert.equal(summary.downloaded, 0);
     assert.equal(summary.cached, 0);
+  } finally {
+    tmp.cleanup();
+  }
+});
+
+// Regression for #131: a `Jane Doe`-style home dir (any path containing a
+// space, accented char, or other percent-encoded character) used to defeat
+// the `import.meta.url === \`file://${process.argv[1]}\`` entry-point check
+// because `import.meta.url` percent-encodes ("file:///.../Jane%20Doe/...")
+// while `process.argv[1]` is the raw path. main() never ran, the script
+// silently exited 0, and setup.{sh,ps1} treated that as success — leaving
+// the user without their pinned models. Fix: compare against
+// `pathToFileURL(process.argv[1]).href`, which uses the same encoding as
+// `import.meta.url`.
+test("16.3.1 (#131) fetch-models entrypoint runs main() even when its path contains a space", () => {
+  const tmp = freshTempDir();
+  try {
+    // Reconstruct the script under a path that contains a literal space.
+    const scriptSrc = fileURLToPath(
+      new URL("../scripts/fetch-models.mjs", import.meta.url)
+    );
+    const spacedDir = join(tmp.dir, "with space");
+    mkdirSync(spacedDir, { recursive: true });
+    const spacedScript = join(spacedDir, "fetch-models.mjs");
+    copyFileSync(scriptSrc, spacedScript);
+
+    // Run without args. The CLI is supposed to print the Usage message
+    // and exit 1. If the entrypoint check fails, main() never runs and
+    // the script silently exits 0 — which is the exact bug.
+    const result = spawnSync(process.execPath, [spacedScript], {
+      encoding: "utf8",
+    });
+    assert.equal(
+      result.status,
+      1,
+      `expected exit 1 from no-args usage path, got ${result.status} (stdout=${JSON.stringify(result.stdout)} stderr=${JSON.stringify(result.stderr)})`
+    );
+    assert.match(
+      result.stdout,
+      /Usage: node .*fetch-models\.mjs/,
+      "expected Usage line on stdout"
+    );
   } finally {
     tmp.cleanup();
   }
