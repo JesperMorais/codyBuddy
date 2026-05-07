@@ -1,6 +1,6 @@
 """XTTS-v2 sidecar — Task 12.3.
 
-Run: uvicorn xtts:app --port 31417
+Run: uvicorn buddy_voice.xtts:app --port 31417
 
 A FastAPI sidecar that exposes coqui XTTS-v2 to the daemon for
 voice-cloned, character-rich TTS. XTTS handles the heavy personalities

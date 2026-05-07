@@ -1,6 +1,6 @@
 // Voice sidecar process supervisor — Task 10.1.
 //
-// Spawns voice/main.py via uvicorn, supervises stdout/stderr, polls
+// Spawns voice/buddy_voice/main.py via uvicorn, supervises stdout/stderr, polls
 // /health for readiness, kills cleanly on dispose. Mirrors the shape
 // of extension/src/daemon-spawn.ts so the two supervisors read the
 // same way.
@@ -16,7 +16,7 @@ import { dirname, resolve } from "node:path";
 import { setTimeout as wait } from "node:timers/promises";
 
 export interface VoiceSidecarOptions {
-  /** Absolute path to the voice/ directory containing main.py. */
+  /** Absolute path to the voice/ directory containing buddy_voice/main.py. */
   voiceDir: string;
   /** Loopback port for uvicorn to bind. */
   port: number;
@@ -49,7 +49,7 @@ export function spawnVoiceSidecar(opts: VoiceSidecarOptions): VoiceSidecar {
     [
       "-m",
       "uvicorn",
-      "main:app",
+      "buddy_voice.main:app",
       "--host",
       "127.0.0.1",
       "--port",
@@ -111,12 +111,13 @@ export function spawnVoiceSidecar(opts: VoiceSidecarOptions): VoiceSidecar {
 }
 
 /** Walks up from `start` looking for a `voice/` directory containing
- *  main.py. Returns null when not found; caller should disable
- *  auto-spawn and warn. Mirrors findDaemonScript in the extension. */
+ *  buddy_voice/main.py. Returns null when not found; caller should
+ *  disable auto-spawn and warn. Mirrors findDaemonScript in the
+ *  extension. */
 export function findVoiceDir(start: string, exists: (p: string) => boolean): string | null {
   let dir = resolve(start);
   for (let i = 0; i < 8; i++) {
-    const candidate = resolve(dir, "voice", "main.py");
+    const candidate = resolve(dir, "voice", "buddy_voice", "main.py");
     if (exists(candidate)) return resolve(dir, "voice");
     const parent = dirname(dir);
     if (parent === dir) break;

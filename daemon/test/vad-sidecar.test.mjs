@@ -107,7 +107,7 @@ test(
       [
         "-m",
         "uvicorn",
-        "main:app",
+        "buddy_voice.main:app",
         "--host",
         "127.0.0.1",
         "--port",

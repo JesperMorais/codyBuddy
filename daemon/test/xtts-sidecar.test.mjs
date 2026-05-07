@@ -130,7 +130,7 @@ test(
       [
         "-m",
         "uvicorn",
-        "xtts:app",
+        "buddy_voice.xtts:app",
         "--host",
         "127.0.0.1",
         "--port",
@@ -226,7 +226,7 @@ test(
       [
         "-m",
         "uvicorn",
-        "xtts:app",
+        "buddy_voice.xtts:app",
         "--host",
         "127.0.0.1",
         "--port",
@@ -304,6 +304,6 @@ test("12.3 setup-xtts.ps1 exists in voice/ next to setup-piper.ps1", () => {
   assert.ok(existsSync(join(voiceDir, "setup-xtts.ps1")));
 });
 
-test("12.3 xtts.py exists in voice/", () => {
-  assert.ok(existsSync(join(voiceDir, "xtts.py")));
+test("12.3 xtts.py exists in voice/buddy_voice/", () => {
+  assert.ok(existsSync(join(voiceDir, "buddy_voice", "xtts.py")));
 });
