@@ -13,6 +13,21 @@ export interface SidebarControls {
   shuffle: boolean;
 }
 
+/**
+ * Coarse-grained UI state for the sidebar's status pill (Task 14.2).
+ * Mapped to user-facing labels by `BuddySidebarProvider.labelFor`:
+ *   idle      → "Ready"
+ *   down      → "Daemon down"
+ *   listening → "I'm listening…"
+ *   thinking  → "Buddy is thinking…"
+ *   speaking  → "Buddy is speaking…"
+ *
+ * The pill reflects the buddy's current activity, not just whether
+ * the daemon process is alive — the old daemon-up status-bar icon
+ * stays for the VS Code status bar; this is the in-sidebar surface.
+ */
+export type BuddyState = "idle" | "down" | "listening" | "thinking" | "speaking";
+
 export class BuddySidebarProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = "coding-buddy.sidebar";
 
@@ -27,6 +42,8 @@ export class BuddySidebarProvider implements vscode.WebviewViewProvider {
   private voiceEnabled = true;
   private voiceRate = 1.05;
   private lastControls?: SidebarControls;
+  private lastBuddyState: BuddyState = "idle";
+  private speechEndedHandler?: () => void;
 
   resolveWebviewView(view: vscode.WebviewView): void {
     this.view = view;
@@ -46,12 +63,24 @@ export class BuddySidebarProvider implements vscode.WebviewViewProvider {
         this.personalityChangeHandler(String(msg.personality ?? ""));
       } else if (msg.type === "setShuffle" && this.shuffleChangeHandler) {
         this.shuffleChangeHandler(!!msg.shuffle);
+      } else if (msg.type === "speechEnded" && this.speechEndedHandler) {
+        // Webview fired SpeechSynthesisUtterance.onend — Task 14.2
+        // uses this to flip the status pill back to idle once the
+        // buddy finishes speaking.
+        this.speechEndedHandler();
       }
     });
     this.view.webview.postMessage({ type: "voiceConfig", enabled: this.voiceEnabled, rate: this.voiceRate });
     if (this.lastControls) {
       this.view.webview.postMessage({ type: "controls", ...this.lastControls });
     }
+    // Re-hydrate the status pill so a re-opened webview reflects the
+    // current state instead of momentarily flashing "Ready".
+    this.view.webview.postMessage({
+      type: "buddyState",
+      state: this.lastBuddyState,
+      label: this.labelFor(this.lastBuddyState),
+    });
     while (this.pending.length) this.post(this.pending.shift()!);
   }
 
@@ -99,6 +128,48 @@ export class BuddySidebarProvider implements vscode.WebviewViewProvider {
 
   isVoiceEnabled(): boolean {
     return this.voiceEnabled;
+  }
+
+  /** Update the sidebar status pill (Task 14.2). The pill reflects
+   *  the buddy's current activity — idle / listening / thinking /
+   *  speaking, plus down when the daemon is unreachable. The label
+   *  is computed here so callers don't have to hand-string the
+   *  user-facing copy. */
+  setBuddyState(state: BuddyState): void {
+    this.lastBuddyState = state;
+    this.view?.webview.postMessage({
+      type: "buddyState",
+      state,
+      label: this.labelFor(state),
+    });
+  }
+
+  /** Read the cached buddy state — for tests / introspection. */
+  getBuddyState(): BuddyState {
+    return this.lastBuddyState;
+  }
+
+  /** Subscribe to the webview's "speech ended" signal (the
+   *  SpeechSynthesisUtterance.onend callback). Task 14.2 wires
+   *  this to flip the pill from "speaking" back to "idle". */
+  onSpeechEnded(h: () => void): void {
+    this.speechEndedHandler = h;
+  }
+
+  private labelFor(state: BuddyState): string {
+    switch (state) {
+      case "listening":
+        return "I'm listening…";
+      case "thinking":
+        return "Buddy is thinking…";
+      case "speaking":
+        return "Buddy is speaking…";
+      case "down":
+        return "Daemon down";
+      case "idle":
+      default:
+        return "Ready";
+    }
   }
 
   push(msg: SidebarMessage): void {
@@ -204,8 +275,30 @@ export class BuddySidebarProvider implements vscode.WebviewViewProvider {
   #controls select { background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border); padding: 2px 4px; font-size: 12px; }
   #controls .shuffle-row { display: flex; align-items: center; gap: 3px; font-size: 11px; }
   #controls input[type=checkbox] { margin: 0; }
+  /* Task 14.2: status pill replaces / supplements the editor's
+     daemon-up icon. The data-state attribute drives the colour
+     swatch so screen readers still get the textual label. */
+  #buddy-state {
+    display: flex; align-items: center; gap: 6px;
+    padding: 4px 8px; margin-bottom: 6px; border-radius: 4px;
+    background: var(--vscode-input-background);
+    border: 1px solid var(--vscode-input-border);
+    font-size: 12px;
+  }
+  #buddy-state::before {
+    content: ""; width: 8px; height: 8px; border-radius: 50%;
+    background: var(--vscode-charts-blue);
+    flex-shrink: 0;
+  }
+  #buddy-state[data-state="idle"]::before     { background: var(--vscode-charts-blue); }
+  #buddy-state[data-state="listening"]::before { background: var(--vscode-charts-green); animation: pulse 1.2s ease-in-out infinite; }
+  #buddy-state[data-state="thinking"]::before  { background: var(--vscode-charts-yellow); animation: pulse 1.2s ease-in-out infinite; }
+  #buddy-state[data-state="speaking"]::before  { background: var(--vscode-charts-purple); animation: pulse 1.2s ease-in-out infinite; }
+  #buddy-state[data-state="down"]::before      { background: var(--vscode-errorForeground); }
+  #buddy-state[data-state="down"] { color: var(--vscode-errorForeground); }
 </style></head>
 <body>
+  <div id="buddy-state" data-state="idle">Ready</div>
   <div id="controls">
     <label for="mode-select">Mode</label>
     <select id="mode-select"></select>
@@ -303,10 +396,30 @@ export class BuddySidebarProvider implements vscode.WebviewViewProvider {
       u.rate = voiceRate;
       u.lang = 'en-US';
       if (englishVoice) u.voice = englishVoice;
+      // Task 14.2: tell the extension when speech finishes so the
+      // status pill flips back from "speaking" to "idle". onerror
+      // also unblocks — better stuck-on-speaking-pill timeout
+      // than no signal at all.
+      const fireEnd = () => {
+        try { vscode.postMessage({ type: 'speechEnded' }); } catch (e) { /* ignore */ }
+      };
+      u.onend = fireEnd;
+      u.onerror = fireEnd;
       window.speechSynthesis.speak(u);
     } catch (e) {
       // ignore
     }
+  }
+
+  // Task 14.2: drive the status pill from extension messages.
+  const buddyStatePill = document.getElementById('buddy-state');
+  function setBuddyState(state, label) {
+    if (!buddyStatePill) return;
+    buddyStatePill.dataset.state = state;
+    // The textContent IS the label — keeps the pill accessible
+    // (NVDA/JAWS read it on focus) without an extra aria-live
+    // dance. The colour swatch is decorative.
+    buddyStatePill.textContent = label || state;
   }
 
   const mic = document.getElementById('mic');
@@ -448,6 +561,9 @@ export class BuddySidebarProvider implements vscode.WebviewViewProvider {
       if (!personalityOptions.includes('nice')) personalityOptions.unshift('nice');
       fillSelect(personalitySelect, personalityOptions, m.personality || 'nice');
       shuffleCheckbox.checked = !!m.shuffle;
+    } else if (m.type === 'buddyState') {
+      // Task 14.2: status pill update.
+      setBuddyState(m.state, m.label);
     } else if (m.type === 'testVoice') {
       const div = document.createElement('div');
       div.className = 'status';

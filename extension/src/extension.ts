@@ -73,6 +73,11 @@ export function activate(ctx: vscode.ExtensionContext): void {
   bridge.onHealth(({ up }) => {
     daemonUp = up;
     refreshStatus();
+    // Task 14.2: drive the sidebar status pill from health. Up
+    // resolves to "idle" only when nothing else is in flight; the
+    // record / trigger / reply paths below override it for the
+    // duration of an interaction.
+    sidebar.setBuddyState(up ? "idle" : "down");
   });
 
   bridge.onAudioOwner(({ owner, backend }) => {
@@ -135,6 +140,9 @@ export function activate(ctx: vscode.ExtensionContext): void {
   bridge.onReply((reply, trigger) => {
     if (reply.mode === "no_op") {
       output.appendLine(`[reply] ${trigger} → no_op`);
+      // No content to speak — drop back to idle so the pill doesn't
+      // get stuck on "thinking" after a no_op trigger.
+      if (daemonUp) sidebar.setBuddyState("idle");
       return;
     }
     engine.noteSpoken();
@@ -142,10 +150,27 @@ export function activate(ctx: vscode.ExtensionContext): void {
       void vscode.commands.executeCommand("workbench.view.extension.coding-buddy");
     }
     sidebar.push({ trigger, reply: { mode: reply.mode, text: reply.text } });
+    // Task 14.2: pill flips to "speaking" until the webview tells
+    // us speech ended (see sidebar.onSpeechEnded below). Daemon-
+    // owned TTS doesn't fire that callback — the pill stays
+    // "speaking" until the next health/state event nudges it. A
+    // future task can wire the daemon's TTS finish signal in.
+    if (daemonUp) sidebar.setBuddyState("speaking");
+  });
+
+  sidebar.onSpeechEnded(() => {
+    // SpeechSynthesisUtterance.onend in the webview — Task 14.2.
+    // Only flip back to idle if we're actually still on "speaking"
+    // (avoids racing a fresh trigger that already moved us to
+    // "thinking").
+    if (sidebar.getBuddyState() === "speaking" && daemonUp) {
+      sidebar.setBuddyState("idle");
+    }
   });
 
   sidebar.onAsk((text) => {
     if (!text.trim()) return;
+    if (daemonUp) sidebar.setBuddyState("thinking");
     sendTrigger(bridge, engine, {
       trigger: "EXPLICIT_ASK",
       reason: "sidebar input",
@@ -174,10 +199,13 @@ export function activate(ctx: vscode.ExtensionContext): void {
       recording = false;
       sidebar.setRecordingState(false);
       sidebar.pushStatus(`Recording failed: ${error ?? "unknown"}`);
+      if (daemonUp) sidebar.setBuddyState("idle");
       return;
     }
     recording = true;
     sidebar.setRecordingState(true);
+    // Task 14.2: pill reflects active mic capture.
+    sidebar.setBuddyState("listening");
   });
 
   bridge.onTranscribed(({ ok, text, error }) => {
@@ -185,13 +213,17 @@ export function activate(ctx: vscode.ExtensionContext): void {
     sidebar.setRecordingState(false);
     if (!ok) {
       sidebar.pushStatus(`Voice failed: ${error ?? "unknown"}`);
+      if (daemonUp) sidebar.setBuddyState("idle");
       return;
     }
     if (!text || !text.trim()) {
       sidebar.pushStatus("Transcription empty.");
+      if (daemonUp) sidebar.setBuddyState("idle");
       return;
     }
     sidebar.notifyTranscribed(text);
+    // Task 14.2: transcript landed → buddy is now thinking about it.
+    if (daemonUp) sidebar.setBuddyState("thinking");
     sendTrigger(bridge, engine, {
       trigger: "EXPLICIT_ASK",
       reason: "voice (Ctrl+Alt+V)",

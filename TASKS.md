@@ -132,7 +132,7 @@ Always-on voice is unviable without aggressive quieting and budget caps.
 ## Phase 14 — Conversational sidebar polish
 
 - [x] **14.1** Live transcript view in the sidebar: shows your speech (gray) and the buddy's replies (white) as they happen. Stays scrolled to bottom. Backchannels are not shown.
-- [ ] **14.2** "Buddy is thinking…" / "Buddy is speaking…" / "I'm listening…" status pill replacing the current daemon-up indicator.
+- [x] **14.2** "Buddy is thinking…" / "Buddy is speaking…" / "I'm listening…" status pill replacing the current daemon-up indicator.
 - [ ] **14.3** Voice-detected feedback: short utterances "good buddy" / "shut up buddy" / "useful" / "wrong" are recognised by a tiny phrase-match layer (no LLM) and logged as votes (replaces old Phase 7.3). Test: feed each phrase as a transcript; assert the corresponding vote is appended.
 
 ## Phase 15 — Setup & onboarding
