@@ -14,6 +14,13 @@
 // scans. Wiring (calling setSuspended on bridge / loop) is the
 // host's job — keeps this module trivially testable.
 
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname } from "node:path";
 import type { TurnEntry, TurnTelemetry } from "./turn-telemetry.js";
 
 export interface DailyCostCapOptions {
@@ -106,6 +113,60 @@ export function applyCapDowngrade(
 ): void {
   for (const s of suspendables) {
     s.setSuspended(status.hit);
+  }
+}
+
+/** Persisted-on-disk shape for ~/.coding-buddy/daily-cost.json
+ *  (Task 16.1.6). The wiring layer reads this on boot to suspend the
+ *  TTS bridge if the cap was already hit earlier in the day, and
+ *  writes it on every cap-state transition so a later restart picks
+ *  up the same posture without recomputing from telemetry. */
+export interface PersistedCapState {
+  date: string;
+  hit: boolean;
+  spent_usd: number;
+  cap_usd: number;
+  computed_at: number;
+}
+
+/** Write `status` to `path` as JSON. Creates the parent directory if
+ *  needed. Errors are logged but never thrown — the live cap path
+ *  must not crash on a bookkeeping write failure. */
+export function persistCapState(path: string, status: CapStatus): void {
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    const payload: PersistedCapState = {
+      date: status.forDate,
+      hit: status.hit,
+      spent_usd: status.spentUsd,
+      cap_usd: status.capUsd,
+      computed_at: status.computedAt,
+    };
+    writeFileSync(path, JSON.stringify(payload) + "\n");
+  } catch (err) {
+    console.error("[daily-cap] persist failed:", err);
+  }
+}
+
+/** Read the persisted state. Returns undefined when the file is
+ *  missing, malformed, or stamped with a date other than today
+ *  (local). The caller can use the returned `hit` to mute bridges at
+ *  boot without recomputing from telemetry. `now` lets tests pin
+ *  "today". */
+export function loadCapState(
+  path: string,
+  now: () => number = Date.now
+): PersistedCapState | undefined {
+  try {
+    if (!existsSync(path)) return undefined;
+    const raw = readFileSync(path, "utf8");
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed.date !== "string") return undefined;
+    if (parsed.date !== localDateIso(now())) return undefined;
+    return parsed as PersistedCapState;
+  } catch (err) {
+    console.error("[daily-cap] load failed:", err);
+    return undefined;
   }
 }
 
