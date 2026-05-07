@@ -32,6 +32,7 @@ import { StreamingSttBridge } from "./stt-stream.js";
 import { StreamingTtsBridge } from "./tts-stream.js";
 import { TieredRouter } from "./tiered-router.js";
 import { AudioHost, AlwaysEscalateHaiku } from "./audio-host.js";
+import { AnthropicHaikuClassifier } from "./haiku-classifier.js";
 import { loadConversationalPrompts } from "./conversational-prompts.js";
 
 // Resolve __dirname for both the dev path (Node ESM running from
@@ -325,8 +326,19 @@ if (voiceLoop === "on") {
         url: `ws://127.0.0.1:${voicePort}/tts/stream`,
         log: (line) => console.log(line),
       });
+      // Task 16.1.1: real Haiku classifier on the Anthropic path so
+      // cheap-tier turns actually save tokens. Ollama users keep the
+      // always-escalate stub — Haiku is Anthropic-only and local
+      // models have no per-turn cost incentive to gate.
+      const haikuClassifier =
+        provider === "anthropic" && apiKey
+          ? new AnthropicHaikuClassifier({
+              apiKey,
+              log: (line) => console.log(line),
+            })
+          : new AlwaysEscalateHaiku();
       const router = new TieredRouter({
-        haiku: new AlwaysEscalateHaiku(),
+        haiku: haikuClassifier,
         sonnet: client,
         log: (line) => console.log(line),
       });
