@@ -12,7 +12,10 @@ voices_dir="$here/voices"
 mkdir -p "$piper_dir" "$voices_dir"
 
 # Map host OS+arch to the right Piper release artifact.
-# Pinned to 2023.11.14-2 to match setup-piper.ps1.
+# Pinned to 2023.11.14-2 to match setup-piper.ps1 — this is also the
+# latest rhasspy/piper release on GitHub (upstream has been dormant
+# since Nov 2023). Bump in lockstep with the .ps1 if a newer release
+# ships.
 piper_release="2023.11.14-2"
 uname_s="$(uname -s)"
 uname_m="$(uname -m)"
