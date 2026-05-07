@@ -20,6 +20,8 @@ extension (VS Code) ──ws──▶ daemon (Node + AiClient) ──http──�
 
 > **Just want chat?** [Skip ahead](#minimal-install--chat-only-60-seconds) — the chat-only path takes ~60 seconds and skips Python, voice models, and the venv.
 
+> **Prefer video?** Watch the 5-minute screencast: [`docs/screencasts/quickstart.mp4`](docs/screencasts/quickstart.mp4). (Recording brief in [`docs/screencasts/README.md`](docs/screencasts/README.md). The MP4 isn't tracked yet — see the brief for the recording recipe.)
+
 Aimed at a fresh checkout on Windows 11, macOS, or Linux. The only manual step is pasting your Anthropic API key.
 
 1. **Clone and run the installer.**
