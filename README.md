@@ -16,6 +16,110 @@ extension (VS Code) ──ws──▶ daemon (Node + AiClient) ──http──�
 - **`daemon/`** — Node WebSocket server. Owns the AI session, prompt cache, mute state, summarizer, learner profile, vote log, and TTS bridge. Provider-pluggable: Anthropic by default, Ollama as a local fallback.
 - **`voice/`** — FastAPI sidecar that turns text into Kokoro speech and plays it on the host. Optional — Piper and "none" backends ship alongside.
 
+## Quickstart — five minutes from clone to first voice turn
+
+Aimed at a fresh checkout on Windows 11, macOS, or Linux. The only manual step is pasting your Anthropic API key.
+
+1. **Clone and run the installer.**
+   ```bash
+   # Windows (PowerShell)
+   git clone https://github.com/JesperMorais/codyBuddy.git
+   cd codyBuddy
+   pwsh -File setup.ps1
+   ```
+   ```bash
+   # macOS / Linux
+   git clone https://github.com/JesperMorais/codyBuddy.git
+   cd codyBuddy
+   bash setup.sh
+   ```
+   `setup.{ps1,sh}` checks Node ≥20, pnpm, and Python ≥3.11 (each missing tool prints the exact install command), runs `pnpm install`, creates `voice/.venv`, and copies `.env.example` → `.env`. Idempotent — safe to re-run.
+
+2. **Drop your API key into `.env`.**
+   ```bash
+   ANTHROPIC_API_KEY=sk-ant-...
+   ```
+   Skip if you're running Ollama — set `BUDDY_PROVIDER=ollama` instead. (See [Configuration](#configuration-env) for the full list.)
+
+3. **Verify with `pnpm doctor`.**
+   ```bash
+   pnpm doctor
+   ```
+   Every line should be `[OK]` (green) or `[--]` (yellow advisory). If anything is `[XX]` red, fix it before continuing — the message tells you what's missing.
+
+4. **Open the extension folder in VS Code and press <kbd>F5</kbd>** to launch the debug Extension Development Host. The **Coding Buddy** view appears in the activity bar; the daemon auto-spawns on activation.
+
+   ![Sidebar at idle — red mic dot, status pill says "Ready".](docs/screenshots/sidebar-idle.png)
+
+5. **Press <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>V</kbd> to talk.** The first time you'll see the OS mic-permission prompt; allow it. The mic dot turns green, the pill flips to "I'm listening…".
+
+   ![Sidebar listening — green pulsing mic dot, "I'm listening…".](docs/screenshots/sidebar-listening.png)
+
+6. **Ask a question.** When you stop talking, the pill cycles through "Buddy is thinking…" → "Buddy is speaking…" and you'll hear the reply via your configured TTS backend.
+
+   ![Sidebar speaking — purple pulsing dot, "Buddy is speaking…".](docs/screenshots/sidebar-speaking.png)
+
+That's it. Total runtime once `setup.{ps1,sh}` finishes: under five minutes.
+
+> Screenshots above are placeholders described in [`docs/screenshots/README.md`](docs/screenshots/README.md). They render as broken-image icons until someone drops in the actual PNGs — the prose still tells you what to expect.
+
+## Troubleshooting
+
+The five most common ways onboarding fails. If your symptom isn't here, run `pnpm doctor` first — it pinpoints most of them automatically.
+
+### 1. "We need permission to access the microphone"
+
+Symptom: pressing <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>V</kbd> does nothing, or the sidebar stays on "Ready" instead of flipping to "I'm listening…".
+
+Fix:
+- **Windows 11**: Settings → Privacy & Security → Microphone → "Microphone access" ON, and "Let desktop apps access your microphone" ON. Restart VS Code.
+- **macOS**: System Settings → Privacy & Security → Microphone → tick **Visual Studio Code** (or Cursor / Code Insiders, whichever you launched). macOS-specific gotcha: VS Code may need to be granted access once per signed binary — re-quitting and relaunching usually re-prompts.
+- **Linux (PulseAudio / PipeWire)**: `pavucontrol` → Recording tab — confirm the daemon's STT process appears with non-muted input.
+
+### 2. "GPU not found" (XTTS personality silent or slow)
+
+Symptom: switching to a heavyweight personality (drill_sergeant / pirate / shakespearean / rude) produces no audio for ~10s, then plays at 1/3 real-time.
+
+Fix:
+- XTTS-v2 needs an NVIDIA GPU with CUDA for live use. CPU works but is ~3× slower than real-time — fine for testing, useless for live voice.
+- Check what XTTS picked up: `BUDDY_DEBUG_RAW=true` then look for `xtts-v2 loaded on cuda` vs `cpu` in the daemon log.
+- Workaround: pin a Kokoro personality (nice / dry / passive_aggressive) — those run real-time on CPU.
+- Permanent fix: install the CUDA build of torch BEFORE running `voice/setup-xtts.ps1`. Coqui's docs cover the matrix.
+
+### 3. Model download interrupted / corrupted
+
+Symptom: daemon errors with `model checksum mismatch: <name>` (Task 15.10) or the sidecar crashes mid-load.
+
+Fix:
+- Delete the partial file under `voice/models/<name>` (or whatever the error reported) and re-run `setup.{ps1,sh}`. The setup script's downloader is idempotent — it only fetches what's missing or fails the SHA256 check.
+- If your network keeps dropping, the model URLs in `voice/models.json` are HTTPS — try a different network or use a wired connection. The XTTS-v2 checkpoint alone is ~1.5 GB.
+
+### 4. Port 31415 already in use
+
+Symptom: daemon log shows `EADDRINUSE: 127.0.0.1:31415` and the extension status pill flips to "Daemon down".
+
+Fix:
+- Something else is listening — usually a stale daemon from a previous VS Code session that didn't clean up.
+- Find it:
+  ```bash
+  # Windows
+  netstat -ano | findstr :31415
+  ```
+  ```bash
+  # macOS / Linux
+  lsof -iTCP:31415 -sTCP:LISTEN
+  ```
+- Kill the process by PID, or set `BUDDY_DAEMON_PORT=31416` (or any free port) in `.env` AND in VS Code Settings → `codingBuddy.daemonPort`.
+
+### 5. Anthropic 401 / "invalid x-api-key"
+
+Symptom: daemon log shows `401` from Anthropic, sidebar reply mode is `no_op`, no spoken reply.
+
+Fix:
+- Open `.env` — the most common cause is leaving the placeholder `ANTHROPIC_API_KEY=sk-ant-...` from `.env.example`. `pnpm doctor` flags this as red.
+- Paste a real key from <https://console.anthropic.com/settings/keys>. Restart the daemon (`Coding Buddy: Restart daemon` or just <kbd>F5</kbd>-relaunch the extension host).
+- If you're running on Ollama (`BUDDY_PROVIDER=ollama`), the Anthropic key is irrelevant and you can leave the placeholder — but check that `BUDDY_OLLAMA_URL` points at a running endpoint.
+
 ## Setup (Windows 11, PowerShell)
 
 ```powershell
