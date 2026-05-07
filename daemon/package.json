@@ -10,7 +10,8 @@
     "start": "node dist/index.js",
     "typecheck": "tsc -p . --noEmit",
     "pretest": "tsc -p .",
-    "test": "node --test"
+    "test": "node --test",
+    "build:bin": "tsc -p . && node scripts/build-bin.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.68.0",

@@ -1,5 +1,6 @@
 node_modules/
 dist/
+dist-bin/
 out/
 *.vsix
 # Build-time copy of the repo-root LICENSE for vsce (Task 15.5).

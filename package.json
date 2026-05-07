@@ -12,7 +12,8 @@
     "changelog": "node scripts/gen-changelog.mjs",
     "changelog:check": "node scripts/gen-changelog.mjs --check",
     "doctor": "node scripts/doctor.mjs",
-    "build:vsix": "pnpm --filter coding-buddy-vscode build:vsix"
+    "build:vsix": "pnpm --filter coding-buddy-vscode build:vsix",
+    "build:daemon-bin": "pnpm --filter buddy-daemon build:bin"
   },
   "packageManager": "pnpm@9.0.0",
   "engines": {
