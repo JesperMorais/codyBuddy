@@ -42,6 +42,7 @@ import { EventEmitter } from "node:events";
 import type { BargeInController } from "./barge-in.js";
 import { SentenceBuffer } from "./sentence-buffer.js";
 import type { AutoQuietGate, QuietState } from "./auto-quiet.js";
+import { matchVotePhrase, type VoteMatch } from "./vote-phrase-matcher.js";
 
 export type ConversationState =
   | "IDLE"
@@ -108,6 +109,22 @@ export interface ConversationLoopDeps {
    * via gate.noteActivity() — the loop only handles the speech path.
    */
   quietGate?: AutoQuietGate;
+  /**
+   * Optional voice-detected vote handler (Task 14.3). When wired,
+   * the loop runs the phrase matcher on every incoming transcript
+   * BEFORE consulting the quiet gate or running the LLM. A match
+   * results in the handler being invoked with the vote and the
+   * canonical phrase, after which the transcript is consumed (no
+   * LLM round-trip). Empty/non-matching transcripts fall through
+   * to the existing path.
+   *
+   * Production hosts wire this to the existing VoteStore.record so
+   * voice and sidebar-button votes share the same JSONL log.
+   */
+  voteHandler?: (
+    match: VoteMatch,
+    rawTranscript: string
+  ) => void | Promise<void>;
 }
 
 export class ConversationLoop {
@@ -220,6 +237,32 @@ export class ConversationLoop {
       this.transition("IDLE");
       this.maybeConsumeOpportunity();
       return;
+    }
+    // Voice vote (Task 14.3): "good buddy" / "useful" / "shut up
+    // buddy" / "wrong" are recognised by phrase-match (no LLM)
+    // and logged as votes via the host's voteHandler. The
+    // transcript is consumed — we don't pass it on to the LLM
+    // because the user wasn't asking a question. This also keeps
+    // votes out of the conversation transcript visible to later
+    // turns (it would just confuse a model that didn't generate
+    // the prior reply).
+    if (this.deps.voteHandler) {
+      const voteMatch = matchVotePhrase(trimmed);
+      if (voteMatch) {
+        this.log(
+          `[loop] vote-phrase matched: ${voteMatch.phrase} → ${voteMatch.vote}`
+        );
+        try {
+          await this.deps.voteHandler(voteMatch, trimmed);
+        } catch (err) {
+          this.log(
+            `[loop] voteHandler threw: ${err instanceof Error ? err.message : err}`
+          );
+        }
+        this.transition("IDLE");
+        this.maybeConsumeOpportunity();
+        return;
+      }
     }
     // Auto-quiet gate (Task 13.1): when QUIET, the gate's filter
     // decides whether this transcript reaches the LLM at all. If
