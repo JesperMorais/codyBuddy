@@ -27,6 +27,7 @@ type AudioOwnerHandler = (info: { owner: "daemon" | "webview"; backend: string }
 type TranscribedHandler = (info: { ok: boolean; text?: string; error?: string; requestId?: string }) => void;
 type RecordStartedHandler = (info: { ok: boolean; error?: string }) => void;
 type HealthHandler = (info: { up: boolean }) => void;
+type DemoModeHandler = (info: { active: boolean }) => void;
 
 const PING_TIMEOUT_MS = 3_000;
 
@@ -42,6 +43,7 @@ export class DaemonBridge {
   private transcribedHandler?: TranscribedHandler;
   private recordStartedHandler?: RecordStartedHandler;
   private healthHandler?: HealthHandler;
+  private demoModeHandler?: DemoModeHandler;
   private healthUp = false;
   private disposed = false;
 
@@ -87,6 +89,11 @@ export class DaemonBridge {
 
   onAudioOwner(h: AudioOwnerHandler): void {
     this.audioOwnerHandler = h;
+  }
+
+  /** Subscribe to demo-mode toggles from the daemon (Task 15.4). */
+  onDemoMode(h: DemoModeHandler): void {
+    this.demoModeHandler = h;
   }
 
   setVolume(v: number): void {
@@ -227,6 +234,10 @@ export class DaemonBridge {
             owner: msg.owner === "daemon" ? "daemon" : "webview",
             backend: String(msg.backend ?? ""),
           });
+        } else if (msg.type === "demoMode" && this.demoModeHandler) {
+          // Task 15.4: daemon tells the sidebar whether to render
+          // the demo-mode watermark.
+          this.demoModeHandler({ active: !!msg.active });
         } else if (msg.type === "recordStarted" && this.recordStartedHandler) {
           this.recordStartedHandler({
             ok: !!msg.ok,

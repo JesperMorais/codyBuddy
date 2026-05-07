@@ -16,6 +16,8 @@ import { loadPromptDir, loadPersonalities } from "./personalities-loader.js";
 import { loadPersonalityConfigs } from "./personality-config.js";
 import { TurnTelemetry } from "./turn-telemetry.js";
 import { RollingCostRate } from "./cost-rate.js";
+import { DemoClient } from "./demo-client.js";
+import { DemoFallbackClient } from "./demo-fallback.js";
 import { join } from "node:path";
 import { existsSync } from "node:fs";
 import { findVoiceDir, spawnVoiceSidecar } from "./voice-sidecar.js";
@@ -30,7 +32,16 @@ if (provider !== "anthropic" && provider !== "ollama") {
 }
 
 const apiKey = process.env.ANTHROPIC_API_KEY;
-if (provider === "anthropic" && !apiKey) {
+const demoMode =
+  (process.env.BUDDY_DEMO ?? "").toLowerCase() === "true";
+// Treat the literal placeholder from .env.example as "no key" so
+// new users hit demo mode rather than a 401 on first turn.
+const placeholderKey =
+  apiKey === undefined ||
+  apiKey === "" ||
+  apiKey === "sk-ant-..." ||
+  apiKey.startsWith("sk-ant-...");
+if (provider === "anthropic" && !apiKey && !demoMode) {
   console.error("ANTHROPIC_API_KEY missing. Copy .env.example → .env.");
   process.exit(1);
 }
@@ -98,11 +109,37 @@ if (kokoroVoiceFor.size > 0) {
 }
 
 let client: AiClient;
+// Hook used to broadcast demoMode:false when the first real call
+// succeeds (Task 15.4). Wired further down once startServer is
+// constructed.
+let onDemoDisable: () => void = () => {};
 if (provider === "ollama") {
   const ollamaUrl = process.env.BUDDY_OLLAMA_URL ?? "http://localhost:11434/v1";
   const ollamaModel = process.env.BUDDY_OLLAMA_MODEL ?? DEFAULT_OLLAMA_MODEL;
   client = new OllamaClient({ baseUrl: ollamaUrl, model: ollamaModel });
   console.log(`[buddy-daemon] provider=ollama url=${ollamaUrl} model=${ollamaModel}`);
+} else if (demoMode && placeholderKey) {
+  // BUDDY_DEMO=true with no real key: pure DemoClient, no network.
+  client = new DemoClient();
+  console.log(`[buddy-daemon] DEMO MODE active — replies are canned, not from Claude.`);
+} else if (demoMode) {
+  // BUDDY_DEMO=true with a key: try real, fall back to demo until
+  // the first real success disables demo for the rest of the session.
+  const real = new AnthropicClient(apiKey!, model);
+  const demo = new DemoClient();
+  client = new DemoFallbackClient({
+    real,
+    demo,
+    onRealSuccess: () => {
+      console.log(`[buddy-daemon] demo mode disabled — first real Anthropic call succeeded.`);
+      try {
+        onDemoDisable();
+      } catch (err) {
+        console.error("[buddy-daemon] onDemoDisable hook threw:", err);
+      }
+    },
+  });
+  console.log(`[buddy-daemon] DEMO MODE armed — will disable on first real Anthropic success.`);
 } else {
   client = new AnthropicClient(apiKey!, model);
   console.log(`[buddy-daemon] provider=anthropic model=${model}`);
@@ -158,7 +195,11 @@ const wss = startServer({
   kokoroVoiceFor,
   personalityVoiceConfigs: personalityConfigs,
   costRate,
+  demoMode,
 });
+// Wire DemoFallbackClient's onRealSuccess hook to broadcast
+// demoMode:false to every connected webview (Task 15.4).
+onDemoDisable = () => wss.setDemoMode(false);
 console.log(
   `[buddy-daemon] listening on ws://127.0.0.1:${port} (model=${model}, tts=${tts.describe()}, stt=${stt.describe()})`
 );
