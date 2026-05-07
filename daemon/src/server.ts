@@ -92,7 +92,26 @@ export function startServer(deps: ServerDeps): WebSocketServer & DemoToggle {
   // Task 15.4: initial demo flag. The host can flip it later via
   // the setDemoMode method on the returned wss object.
   let demoMode = !!deps.demoMode;
-  const wss = new WebSocketServer({ host: "127.0.0.1", port });
+  // CSWSH guard (#94). The loopback bind doesn't gate browser
+  // connections — Same-Origin Policy doesn't apply to WebSockets, so
+  // any browser tab on the user's machine can connect and drive the
+  // daemon (cost burn via `trigger`, learning-report exfil via
+  // `getReport`). Reject any connection carrying an `Origin` header:
+  // the legitimate Node `ws` client (extension + daemon tests) sends
+  // none unless `options.origin` is explicitly passed, which nothing
+  // in this repo does.
+  const wss = new WebSocketServer({
+    host: "127.0.0.1",
+    port,
+    verifyClient: ({ origin }, cb) => {
+      if (origin) {
+        console.warn(`[buddy-daemon] rejecting WS connect with Origin=${origin}`);
+        cb(false, 403, "origin not allowed");
+        return;
+      }
+      cb(true);
+    },
+  });
 
   // The modeSet ack carries every personality-axis dimension (mode,
   // personality, shuffle) so the sidebar updates them in one round-trip

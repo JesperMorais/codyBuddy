@@ -32,6 +32,7 @@ import type { TurnTelemetry } from "./turn-telemetry.js";
 import type { UsageRecord } from "./telemetry.js";
 import type { WakeWordGate } from "./wake-word.js";
 import type { BackchannelController } from "./backchannel.js";
+import type { AutoQuietGate } from "./auto-quiet.js";
 
 /** Narrow shape of VadBridge that the host actually uses. Tests
  *  pass a tiny fake; production passes the real bridge. */
@@ -116,6 +117,15 @@ export interface AudioHostDeps {
    *  3s threshold is observed within one frame. 0 disables the
    *  host-driven setInterval (tests drive `tick()` manually). */
   backchannelTickMs?: number;
+  /** Optional auto-quiet gate (Task 16.1.5). When provided, STT
+   *  finals also pass through `gate.shouldForwardTranscript(text)`
+   *  before reaching the loop. After 5min of silence the gate
+   *  drops to QUIET; transcripts under 24 chars (or missing the
+   *  configured wake-word) are dropped until activity resumes.
+   *  VAD speech-start fires `noteActivity` so a returning user
+   *  resumes immediately. Omitted preserves the 16.1 MVP
+   *  always-forward behaviour. */
+  autoQuiet?: AutoQuietGate;
   log?: (line: string) => void;
 }
 
@@ -166,10 +176,18 @@ export class AudioHost {
       this.loop.speechStart();
       // Task 16.1.4: drive backchannel from VAD speech-start.
       deps.backchannel?.notifySpeechStart();
+      // Task 16.1.5: speech-start is a sign of life — resets the
+      // auto-quiet silence countdown so a returning user doesn't
+      // get filtered on their first transcript.
+      deps.autoQuiet?.noteActivity();
     });
     deps.vad.onSpeechEnd(() => {
       this.loop.speechEnd();
       deps.backchannel?.notifySpeechEnd();
+      // Spec also says speech-end resumes the gate; noteActivity is
+      // idempotent so calling it on both edges keeps the silence
+      // window aligned with reality.
+      deps.autoQuiet?.noteActivity();
     });
     deps.stt.onFinal((text) => {
       // Task 16.1.3: gate STT finals through the optional wake-word
@@ -183,6 +201,17 @@ export class AudioHost {
         ? deps.wakeWordGate.forward(text).text
         : text;
       if (forwarded === null) return;
+      // Task 16.1.5: after the wake-word gate clears the transcript
+      // for the LLM-forwarding path, also consult the auto-quiet
+      // gate. After 5min of silence the gate enters QUIET and drops
+      // short transcripts (likely VAD misfires or backchannel
+      // murmurs); the first long transcript or a noteActivity()
+      // call resumes ACTIVE. Both gates are independently optional
+      // — omitting either restores the previous layer's behaviour.
+      if (deps.autoQuiet) {
+        const decision = deps.autoQuiet.shouldForwardTranscript(forwarded);
+        if (decision.dropped) return;
+      }
       // The conversation loop is async-safe with respect to
       // transcript() — fire-and-forget is fine.
       void this.loop.transcript(forwarded);
