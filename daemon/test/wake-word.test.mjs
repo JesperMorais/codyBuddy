@@ -136,3 +136,41 @@ test("10.8 (k) custom wake word other than 'hey buddy' works", () => {
   assert.equal(result.triggered, true);
   assert.equal(result.text, "what is it");
 });
+
+// 16.13: WakeWordGate.findPhrase was a substring match (String#indexOf
+// on the lowercased haystack), so wake word "buddy" triggered on
+// "buddybuilds" or "my buddyship is great". Switched to a whole-word
+// regex match. The cases below pin the new semantics.
+
+test("16.13 (l) single-word wake 'buddy' triggers on a real word boundary", () => {
+  const { gate } = buildGate({ phrase: "buddy" });
+  const result = gate.forward("hey buddy what time is it");
+  assert.equal(result.triggered, true);
+  assert.equal(result.state, "armed");
+  assert.equal(result.text, "what time is it");
+});
+
+test("16.13 (m) single-word wake 'buddy' does NOT trigger on 'buddybuilds'", () => {
+  const { gate } = buildGate({ phrase: "buddy" });
+  const result = gate.forward("buddybuilds is a cool startup");
+  assert.equal(result.triggered, false, "'buddybuilds' must not be treated as the wake word");
+  assert.equal(result.state, "gated");
+  assert.equal(result.text, null);
+});
+
+test("16.13 (n) single-word wake 'buddy' does NOT trigger on 'my buddyship is great'", () => {
+  const { gate } = buildGate({ phrase: "buddy" });
+  const result = gate.forward("my buddyship is great");
+  assert.equal(result.triggered, false);
+  assert.equal(result.state, "gated");
+  assert.equal(result.text, null);
+});
+
+test("16.13 (o) wake word still triggers when followed by punctuation (no trailing space)", () => {
+  const { gate } = buildGate({ phrase: "buddy" });
+  const result = gate.forward("buddy, what's the weather?");
+  assert.equal(result.triggered, true);
+  assert.equal(result.state, "armed");
+  // Anything after the wake word is forwarded verbatim modulo trim.
+  assert.equal(result.text, ", what's the weather?");
+});

@@ -52,6 +52,7 @@ export interface ForwardResult {
 export class WakeWordGate {
   private phrase: string;
   private phraseLower: string;
+  private phraseRegex: RegExp | null;
   private off: boolean;
   private activeWindowMs: number;
   private clock: () => number;
@@ -63,6 +64,7 @@ export class WakeWordGate {
     this.off = raw === "" || raw.toLowerCase() === "off";
     this.phrase = this.off ? "" : raw;
     this.phraseLower = this.phrase.toLowerCase();
+    this.phraseRegex = this.off ? null : buildPhraseRegex(this.phraseLower);
     this.activeWindowMs = opts.activeWindowMs ?? 30_000;
     this.clock = opts.clock ?? Date.now;
   }
@@ -95,7 +97,7 @@ export class WakeWordGate {
     }
     const text = transcript ?? "";
     const armed = now < this.armedUntil;
-    const idx = findPhrase(text, this.phraseLower);
+    const idx = findPhrase(text, this.phraseRegex);
 
     if (armed && idx < 0) {
       // Inside the active window and no fresh wake word — let the
@@ -139,12 +141,34 @@ export class WakeWordGate {
   }
 }
 
+/** Escape regex metacharacters so user-provided wake words don't
+ *  accidentally inject regex syntax. */
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Build a case-insensitive whole-word matcher for the phrase.
+ *  Word boundaries are anchored only on edges that are word
+ *  characters — if the phrase starts or ends with a non-word
+ *  character (rare, e.g. quotes or punctuation in a wake word),
+ *  `\b` would never match there, so we omit the boundary on that
+ *  side and fall back to a plain (still case-insensitive) match.
+ *  The common case "buddy" / "hey buddy" / "computer" gets full
+ *  whole-word semantics. */
+function buildPhraseRegex(phraseLower: string): RegExp | null {
+  if (!phraseLower) return null;
+  const escaped = escapeRegex(phraseLower);
+  const startsWithWord = /\w/.test(phraseLower[0]!);
+  const endsWithWord = /\w/.test(phraseLower[phraseLower.length - 1]!);
+  const left = startsWithWord ? "\\b" : "";
+  const right = endsWithWord ? "\\b" : "";
+  return new RegExp(`${left}${escaped}${right}`, "i");
+}
+
 /** Case-insensitive whole-word phrase match. Returns the index of
- *  the first match in the original casing, or -1. We don't reach for
- *  a regex because the wake word is user-provided — escaping is
- *  trivial but skipping it is fine here, the search is just
- *  String#indexOf on the lowercased haystack. */
-function findPhrase(haystack: string, phraseLower: string): number {
-  if (!phraseLower) return -1;
-  return haystack.toLowerCase().indexOf(phraseLower);
+ *  the first match in the original casing, or -1. */
+function findPhrase(haystack: string, regex: RegExp | null): number {
+  if (!regex) return -1;
+  const m = regex.exec(haystack);
+  return m ? m.index : -1;
 }
