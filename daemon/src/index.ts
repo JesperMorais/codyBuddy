@@ -468,6 +468,10 @@ if (voiceLoop === "on") {
               );
             }
           : undefined,
+        // Task 16.1.8: every loop transition broadcasts a `loopState`
+        // frame so the sidebar pill reflects the actual conversation
+        // state instead of just the legacy daemon-up signal.
+        onLoopState: (state) => wss.broadcastLoopState(state),
         getSystemBlocks: () => {
           // Conversational mode prompt + personality overlay (only
           // when not "nice"). Same precedence rules as the chat path.

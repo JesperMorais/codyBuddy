@@ -82,6 +82,10 @@ export interface DemoToggle {
     capUsd: number;
     forDate: string;
   }): void;
+  /** Task 16.1.8: broadcast the conversation-loop state to every
+   *  connected webview. Called on every loop transition; the
+   *  sidebar's status pill reflects the wire state directly. */
+  broadcastLoopState(state: string): void;
 }
 
 export function startServer(deps: ServerDeps): WebSocketServer & DemoToggle {
@@ -448,6 +452,18 @@ export function startServer(deps: ServerDeps): WebSocketServer & DemoToggle {
       cap_usd: status.capUsd,
       for_date: status.forDate,
     });
+    for (const client of wss.clients) {
+      if ((client as { readyState?: number }).readyState === 1) {
+        try {
+          (client as WebSocket).send(msg);
+        } catch {
+          // closed mid-flight; nothing to do
+        }
+      }
+    }
+  };
+  augmented.broadcastLoopState = (state: string) => {
+    const msg = JSON.stringify({ type: "loopState", state });
     for (const client of wss.clients) {
       if ((client as { readyState?: number }).readyState === 1) {
         try {

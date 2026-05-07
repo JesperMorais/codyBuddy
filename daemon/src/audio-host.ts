@@ -147,7 +147,40 @@ export interface AudioHostDeps {
    *  broadcasts `{type: "capState", state: "hit"|"ok", ...}` and
    *  writes ~/.coding-buddy/daily-cost.json. */
   onCapStateChange?: (status: CapStatus) => void;
+  /** Fires on every loop state transition with the lowercase wire
+   *  name (Task 16.1.8). Production wires this to
+   *  `wss.broadcastLoopState`, which sends a
+   *  `{type: "loopState", state: "idle|listening|thinking|speaking|interrupted|quiet"}`
+   *  frame to every connected webview. The sidebar's status pill
+   *  reflects the actual conversation state instead of just the
+   *  legacy daemon-up signal. The host emits `quiet` whenever the
+   *  optional `autoQuiet` gate reports QUIET — the loop itself has
+   *  no QUIET state, but the gate's posture is what the user wants
+   *  to see. */
+  onLoopState?: (state: LoopWireState) => void;
   log?: (line: string) => void;
+}
+
+/** Lowercase wire format the sidebar pill consumes. Mirrors the
+ *  ConversationLoop's state-machine names plus `quiet` from the
+ *  autoQuiet gate. */
+export type LoopWireState =
+  | "idle"
+  | "listening"
+  | "thinking"
+  | "speaking"
+  | "interrupted"
+  | "quiet";
+
+/** Pure helper — lowercase wire name for a loop state, with the
+ *  autoQuiet gate's QUIET posture overriding IDLE. Exported only for
+ *  tests. */
+export function mapLoopStateToWire(
+  state: ConversationState,
+  gate?: AutoQuietGate
+): LoopWireState {
+  if (state === "IDLE" && gate && gate.state() === "QUIET") return "quiet";
+  return state.toLowerCase() as LoopWireState;
 }
 
 /**
@@ -248,6 +281,11 @@ export class AudioHost {
       // forwarding every transition preserves its per-segment latch.
       deps.backchannel?.notifyState(next);
       this.observeTransition(prev, next);
+      // Task 16.1.8: emit the lowercase wire state so the sidebar
+      // pill reflects the actual conversation state. The gate's
+      // QUIET posture takes precedence over IDLE — it's a more
+      // informative pill label.
+      this.emitLoopState(next);
     });
 
     // Task 16.1.4: periodic tick so the controller can fire when
@@ -270,6 +308,25 @@ export class AudioHost {
     if (this.backchannelTimer) {
       clearInterval(this.backchannelTimer);
       this.backchannelTimer = undefined;
+    }
+  }
+
+  /** Map a ConversationState to the lowercase wire format and fire
+   *  the onLoopState callback. When the optional autoQuiet gate is
+   *  in QUIET we emit "quiet" instead of "idle" — the gate's
+   *  posture is the more useful pill label. */
+  private emitLoopState(state: ConversationState): void {
+    const cb = this.deps.onLoopState;
+    if (!cb) return;
+    const wire = mapLoopStateToWire(state, this.deps.autoQuiet);
+    try {
+      cb(wire);
+    } catch (err) {
+      this.deps.log?.(
+        `[audio-host] onLoopState threw: ${
+          err instanceof Error ? err.message : String(err)
+        }`
+      );
     }
   }
 
@@ -375,6 +432,11 @@ export class AudioHost {
   /** Test hook: current loop state. */
   getState(): ConversationState {
     return this.loop.getState();
+  }
+
+  /** Test hook: current wire state (post auto-quiet override). */
+  getWireState(): LoopWireState {
+    return mapLoopStateToWire(this.loop.getState(), this.deps.autoQuiet);
   }
 
   /** Test hook: wait for in-flight settle (matches loop API). */
