@@ -71,6 +71,10 @@
       {
         "command": "coding-buddy.selectAudioDevices",
         "title": "Coding Buddy: Select Audio Devices"
+      },
+      {
+        "command": "coding-buddy.runOnboarding",
+        "title": "Coding Buddy: Run setup wizard"
       }
     ],
     "keybindings": [
