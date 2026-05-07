@@ -6,6 +6,10 @@ import type { Recorder } from "./recorder.js";
 import type { VoteStore } from "./votes.js";
 import type { PersonalityConfig } from "./personality-config.js";
 import type { RollingCostRate } from "./cost-rate.js";
+import {
+  enumerateAudioDevices,
+  type AudioDeviceList,
+} from "./audio-devices.js";
 
 export interface ServerDeps {
   session: Session;
@@ -54,6 +58,12 @@ export interface ServerDeps {
    * `setDemoMode` function on the wss object.
    */
   demoMode?: boolean;
+  /**
+   * Optional override for the audio-device enumerator (Task 15.8).
+   * Production passes nothing → the default stub returns empty
+   * lists. Tests inject a fixture list to exercise the WS path.
+   */
+  audioDeviceProvider?: () => Promise<AudioDeviceList>;
 }
 
 /** Returned alongside the WebSocketServer so the host can toggle
@@ -315,6 +325,36 @@ export function startServer(deps: ServerDeps): WebSocketServer & DemoToggle {
             const summary = await session.forceDistillProfile();
             const paths = session.getMemory().paths();
             ws.send(JSON.stringify({ type: "report", summary, paths, refreshed: true }));
+            break;
+          }
+          case "getAudioDevices": {
+            // Task 15.8: ship the device list to the extension so
+            // it can render a quickpick. The default provider
+            // returns empty lists on every platform; tests inject
+            // a fixture via deps.audioDeviceProvider.
+            const requestId = (msg as { requestId?: string }).requestId;
+            try {
+              const provider = deps.audioDeviceProvider ?? enumerateAudioDevices;
+              const list = await provider();
+              ws.send(
+                JSON.stringify({
+                  type: "audioDevices",
+                  requestId,
+                  ok: true,
+                  input: list.input,
+                  output: list.output,
+                })
+              );
+            } catch (err) {
+              ws.send(
+                JSON.stringify({
+                  type: "audioDevices",
+                  requestId,
+                  ok: false,
+                  error: err instanceof Error ? err.message : String(err),
+                })
+              );
+            }
             break;
           }
           case "getCostRate": {

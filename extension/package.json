@@ -67,6 +67,10 @@
       {
         "command": "coding-buddy.hardMute",
         "title": "Coding Buddy: Hard mute (kill mic + TTS now)"
+      },
+      {
+        "command": "coding-buddy.selectAudioDevices",
+        "title": "Coding Buddy: Select Audio Devices"
       }
     ],
     "keybindings": [
