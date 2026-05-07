@@ -87,43 +87,61 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Build daemon
         run: pnpm --filter buddy-daemon build
-      - name: Zip daemon dist
+      - name: Build single-binary daemon (Task 15.6)
+        run: pnpm build:daemon-bin
+      - name: Smoke-test single binary (Task 15.6 spec)
+        run: cd daemon && node --test test/daemon-bin-smoke.test.mjs
+      - name: Zip daemon (dist + bin)
         shell: bash
         run: |
-          # daemon/dist + daemon/package.json + daemon/prompts/ are
-          # what the daemon needs at runtime. Node 20+ is still
-          # required on the user's machine until 15.6's
-          # single-binary path replaces this.
+          # Two artifacts per OS:
+          #   buddy-daemon-<suffix>.zip      — Node-required dist + prompts
+          #   buddy-daemon-<suffix>-bin.zip  — single-binary + sibling prompts
           mkdir -p dist-zip/daemon
           cp -r daemon/dist dist-zip/daemon/dist
           cp daemon/package.json dist-zip/daemon/package.json
           cp -r daemon/prompts dist-zip/daemon/prompts
           cd dist-zip
-          # Use Node's built-in zip via tar -a on Windows, plain zip elsewhere.
           if [ "$RUNNER_OS" = "Windows" ]; then
             7z a -tzip "../buddy-daemon-${{ matrix.suffix }}.zip" daemon
           else
             zip -r "../buddy-daemon-${{ matrix.suffix }}.zip" daemon
           fi
-      - name: Compute daemon zip SHA256
+          cd ..
+          # Single-binary path (Task 15.6): bin + prompts sibling.
+          mkdir -p bin-zip
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            cp daemon/dist-bin/buddy-daemon-${{ matrix.suffix }}.exe bin-zip/
+          else
+            cp daemon/dist-bin/buddy-daemon-${{ matrix.suffix }} bin-zip/
+          fi
+          cp -r daemon/dist-bin/prompts bin-zip/prompts
+          cd bin-zip
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            7z a -tzip "../buddy-daemon-${{ matrix.suffix }}-bin.zip" .
+          else
+            zip -r "../buddy-daemon-${{ matrix.suffix }}-bin.zip" .
+          fi
+      - name: Compute SHA256s
         shell: bash
         run: |
-          name="buddy-daemon-${{ matrix.suffix }}.zip"
-          if command -v sha256sum >/dev/null; then
-            sha256sum "$name" | awk '{print $1}' > "$name.sha256_value"
-          else
-            shasum -a 256 "$name" | awk '{print $1}' > "$name.sha256_value"
-          fi
-          sha="$(cat "$name.sha256_value")"
-          echo "$sha  $name" > "$name.sha256"
-          rm -f "$name.sha256_value"
-      - name: Upload daemon zip artifact
+          for name in "buddy-daemon-${{ matrix.suffix }}.zip" "buddy-daemon-${{ matrix.suffix }}-bin.zip"; do
+            if command -v sha256sum >/dev/null; then
+              sha="$(sha256sum "$name" | awk '{print $1}')"
+            else
+              sha="$(shasum -a 256 "$name" | awk '{print $1}')"
+            fi
+            echo "$sha  $name" > "$name.sha256"
+          done
+      - name: Upload daemon artifacts
         uses: actions/upload-artifact@v4
         with:
           name: daemon-${{ matrix.suffix }}
           path: |
             buddy-daemon-${{ matrix.suffix }}.zip
             buddy-daemon-${{ matrix.suffix }}.zip.sha256
+            buddy-daemon-${{ matrix.suffix }}-bin.zip
+            buddy-daemon-${{ matrix.suffix }}-bin.zip.sha256
 
   release:
     needs: [vsix, daemon-zip]
@@ -140,7 +158,9 @@ jobs:
         run: |
           mkdir -p release-assets
           # Flatten all subdirectories — `actions/download-artifact@v4`
-          # creates one folder per artifact name.
+          # creates one folder per artifact name. Captures both
+          # the Node-required dist zip and the single-binary zip
+          # (Task 15.6) per OS.
           find artifacts -type f -name 'coding-buddy-*.vsix*' -exec cp {} release-assets/ \;
           find artifacts -type f -name 'buddy-daemon-*.zip*' -exec cp {} release-assets/ \;
           ls -la release-assets

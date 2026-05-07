@@ -88,3 +88,8 @@ jobs:
       - name: pnpm doctor (Task 15.2 — exit 0 with no reds)
         shell: bash
         run: pnpm doctor
+      - name: Build + smoke single-binary daemon (Task 15.6)
+        shell: bash
+        run: |
+          pnpm build:daemon-bin
+          cd daemon && node --test test/daemon-bin-smoke.test.mjs

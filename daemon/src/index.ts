@@ -22,8 +22,18 @@ import { join } from "node:path";
 import { existsSync } from "node:fs";
 import { findVoiceDir, spawnVoiceSidecar } from "./voice-sidecar.js";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+// Resolve __dirname for both the dev path (Node ESM running from
+// daemon/dist/index.js) and the SEA bundle (Task 15.6) where
+// esbuild's CJS output makes import.meta empty. In the bundle we
+// fall back to the binary's own location — prompts/ is shipped
+// alongside it in the release zip.
+const __dirname = (() => {
+  try {
+    return dirname(fileURLToPath(import.meta.url));
+  } catch {
+    return dirname(process.execPath);
+  }
+})();
 
 const provider = (process.env.BUDDY_PROVIDER ?? "anthropic").toLowerCase();
 if (provider !== "anthropic" && provider !== "ollama") {
@@ -64,7 +74,13 @@ const whisperExe = process.env.BUDDY_WHISPER_EXE;
 const whisperModel = process.env.BUDDY_WHISPER_MODEL;
 const model = process.env.BUDDY_MODEL ?? "claude-sonnet-4-6";
 
-const promptsDir = resolve(__dirname, "../prompts");
+// Dev: daemon/dist/index.js → ../prompts.
+// SEA bundle: prompts ship as a sibling of the binary.
+const promptsDir = (() => {
+  const sibling = resolve(__dirname, "prompts");
+  if (existsSync(sibling)) return sibling;
+  return resolve(__dirname, "../prompts");
+})();
 const prompts = loadPromptDir(promptsDir);
 console.log(`[buddy-daemon] loaded modes: ${[...prompts.keys()].join(", ")}`);
 
