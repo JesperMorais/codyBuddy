@@ -73,6 +73,15 @@ export interface ServerDeps {
  *  a `{type:"demoMode", active:false}` push and clears the banner. */
 export interface DemoToggle {
   setDemoMode(active: boolean): void;
+  /** Task 16.1.6: broadcast the daily-cost cap state to every
+   *  connected webview. Wiring layer calls this on each cap-state
+   *  transition (hit-edge or clear-edge). */
+  broadcastCapState(status: {
+    hit: boolean;
+    spentUsd: number;
+    capUsd: number;
+    forDate: string;
+  }): void;
 }
 
 export function startServer(deps: ServerDeps): WebSocketServer & DemoToggle {
@@ -422,6 +431,24 @@ export function startServer(deps: ServerDeps): WebSocketServer & DemoToggle {
     for (const client of wss.clients) {
       // ws's WebSocket has no exported readyState constant on
       // the type, so compare against the well-known OPEN value.
+      if ((client as { readyState?: number }).readyState === 1) {
+        try {
+          (client as WebSocket).send(msg);
+        } catch {
+          // closed mid-flight; nothing to do
+        }
+      }
+    }
+  };
+  augmented.broadcastCapState = (status) => {
+    const msg = JSON.stringify({
+      type: "capState",
+      state: status.hit ? "hit" : "ok",
+      spent_usd: status.spentUsd,
+      cap_usd: status.capUsd,
+      for_date: status.forDate,
+    });
+    for (const client of wss.clients) {
       if ((client as { readyState?: number }).readyState === 1) {
         try {
           (client as WebSocket).send(msg);

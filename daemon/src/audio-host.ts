@@ -13,11 +13,6 @@
 // MVP bar in TASKS.md item 16.1.
 //
 // Deliberately deferred to 16.1.x sub-items (still listed in TASKS.md):
-//   - WakeWordGate filtering of STT finals
-//   - BackchannelController periodic scheduler
-//   - AutoQuietGate / DailyCostCap enforcement
-//   - Real HaikuClassifier impl (currently always-escalate stub)
-//   - Per-turn token-usage capture (router doesn't yet surface usage)
 //   - Real audio device wiring (mic → VAD WS, TTS chunks → speaker)
 //   - Sidebar status pill driven by loop transitions
 
@@ -33,6 +28,12 @@ import type { UsageRecord } from "./telemetry.js";
 import type { WakeWordGate } from "./wake-word.js";
 import type { BackchannelController } from "./backchannel.js";
 import type { AutoQuietGate } from "./auto-quiet.js";
+import {
+  applyCapDowngrade,
+  type CapStatus,
+  type DailyCostCap,
+  type Suspendable,
+} from "./daily-cost-cap.js";
 
 /** Narrow shape of VadBridge that the host actually uses. Tests
  *  pass a tiny fake; production passes the real bridge. */
@@ -126,6 +127,26 @@ export interface AudioHostDeps {
    *  resumes immediately. Omitted preserves the 16.1 MVP
    *  always-forward behaviour. */
   autoQuiet?: AutoQuietGate;
+  /** Optional daily-cost cap (Task 16.1.6). When provided, the host
+   *  consults `cap.status()` after every per-turn telemetry append
+   *  and, on a hit-edge or clear-edge transition, calls
+   *  `applyCapDowngrade(status, [loop, ...capSuspendables])` so the
+   *  voice loop AND any extra suspendables (typically the chat-path
+   *  TtsBridge) flip suspension together. The host fires
+   *  `onCapStateChange` on each transition so the wiring layer can
+   *  broadcast a `capState` WS event and persist to disk. Omitting
+   *  the cap preserves the prior behaviour (no enforcement). */
+  dailyCostCap?: DailyCostCap;
+  /** Extra suspendables to flip alongside the host-owned
+   *  ConversationLoop on cap-state transitions. Production passes
+   *  the chat-path TtsBridge here so a voice-driven cap-hit also
+   *  silences chat replies. */
+  capSuspendables?: Suspendable[];
+  /** Fires once per cap-state transition (hit-edge AND clear-edge).
+   *  The host calls it with the fresh status; the wiring layer
+   *  broadcasts `{type: "capState", state: "hit"|"ok", ...}` and
+   *  writes ~/.coding-buddy/daily-cost.json. */
+  onCapStateChange?: (status: CapStatus) => void;
   log?: (line: string) => void;
 }
 
@@ -152,6 +173,10 @@ export class AudioHost {
    *  Held so dispose() can clear it. Undefined when the controller
    *  isn't wired or `backchannelTickMs === 0`. */
   private backchannelTimer?: NodeJS.Timeout;
+  /** Last observed cap-hit state. `undefined` = never checked yet,
+   *  so the first observed status counts as a transition iff it's
+   *  a hit (ensures boot-time hits notify the wiring layer). */
+  private lastCapHit?: boolean;
 
   constructor(private deps: AudioHostDeps) {
     const log = deps.log ?? (() => {});
@@ -301,6 +326,46 @@ export class AudioHost {
       // Telemetry is best-effort — match the rest of the codebase.
       this.deps.log?.(
         `[audio-host] turn telemetry append failed: ${
+          err instanceof Error ? err.message : String(err)
+        }`
+      );
+    }
+    this.observeCapAfterTurn();
+  }
+
+  /** Task 16.1.6: post-turn daily-cap check. Reads the cap status
+   *  (which itself rescans today's telemetry — the line we just
+   *  appended is included) and, on a hit-edge or clear-edge
+   *  transition, suspends/resumes the host-owned loop plus any
+   *  extra suspendables. Fires onCapStateChange on every transition
+   *  so the wiring layer can persist to disk and broadcast WS. No-op
+   *  when no cap is wired. */
+  private observeCapAfterTurn(): void {
+    const cap = this.deps.dailyCostCap;
+    if (!cap) return;
+    let status: CapStatus;
+    try {
+      status = cap.status();
+    } catch (err) {
+      this.deps.log?.(
+        `[audio-host] cap status read failed: ${
+          err instanceof Error ? err.message : String(err)
+        }`
+      );
+      return;
+    }
+    if (this.lastCapHit === status.hit) return;
+    this.lastCapHit = status.hit;
+    const suspendables: Suspendable[] = [
+      this.loop,
+      ...(this.deps.capSuspendables ?? []),
+    ];
+    applyCapDowngrade(status, suspendables);
+    try {
+      this.deps.onCapStateChange?.(status);
+    } catch (err) {
+      this.deps.log?.(
+        `[audio-host] onCapStateChange threw: ${
           err instanceof Error ? err.message : String(err)
         }`
       );

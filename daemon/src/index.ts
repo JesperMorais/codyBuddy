@@ -37,6 +37,13 @@ import { WakeWordGate } from "./wake-word.js";
 import { BackchannelController } from "./backchannel.js";
 import { AutoQuietGate } from "./auto-quiet.js";
 import { loadConversationalPrompts } from "./conversational-prompts.js";
+import {
+  DailyCostCap,
+  applyCapDowngrade,
+  loadCapState,
+  persistCapState,
+} from "./daily-cost-cap.js";
+import { homedir } from "node:os";
 
 // Resolve __dirname for both the dev path (Node ESM running from
 // daemon/dist/index.js) and the SEA bundle (Task 15.6) where
@@ -250,6 +257,32 @@ const votes = new VoteStore();
 // without another deploy.
 const turnTelemetry = new TurnTelemetry();
 const costRate = new RollingCostRate({ turnTelemetry });
+
+// Task 16.1.6: daily USD cap. BUDDY_DAILY_USD overrides the default
+// $5; 0 / negative / NaN disables the cap. The cap reads from the
+// same TurnTelemetry the rolling rate uses, so they stay consistent.
+// On boot we load ~/.coding-buddy/daily-cost.json — if today's cap
+// was hit earlier (different process or a prior daemon run), suspend
+// the chat-path TtsBridge immediately so the user doesn't burn dollars
+// just because the daemon restarted. The cap-state callback (wired
+// after startServer below) writes the file on each transition.
+const dailyCostStatePath = join(homedir(), ".coding-buddy", "daily-cost.json");
+const dailyUsdRaw = process.env.BUDDY_DAILY_USD;
+const dailyUsd = dailyUsdRaw !== undefined ? Number(dailyUsdRaw) : 5.0;
+const capEnabled = Number.isFinite(dailyUsd) && dailyUsd > 0;
+const dailyCostCap = capEnabled
+  ? new DailyCostCap({ capUsd: dailyUsd, turnTelemetry })
+  : undefined;
+if (dailyCostCap) {
+  const persisted = loadCapState(dailyCostStatePath);
+  const initial = dailyCostCap.status();
+  if (initial.hit || persisted?.hit) {
+    console.log(
+      `[buddy-daemon] daily cap HIT at boot ($${initial.spentUsd.toFixed(4)} / $${initial.capUsd.toFixed(2)}, date=${initial.forDate}); muting chat TTS for the rest of the day.`
+    );
+    applyCapDowngrade(initial, [tts]);
+  }
+}
 const wss = startServer({
   session,
   tts,
@@ -399,6 +432,24 @@ if (voiceLoop === "on") {
         wakeWordGate,
         backchannel,
         autoQuiet,
+        // Task 16.1.6: hand the cap into the host so it consults
+        // status() after every recordTurn(). The chat-path TtsBridge
+        // is included as an extra suspendable so a voice-driven cap
+        // hit also silences chat replies. On each transition the host
+        // calls onCapStateChange, which we use to persist + broadcast.
+        dailyCostCap,
+        capSuspendables: dailyCostCap ? [tts] : undefined,
+        onCapStateChange: dailyCostCap
+          ? (status) => {
+              persistCapState(dailyCostStatePath, status);
+              wss.broadcastCapState(status);
+              console.log(
+                `[buddy-daemon] daily cap ${
+                  status.hit ? "HIT" : "cleared"
+                }: $${status.spentUsd.toFixed(4)} / $${status.capUsd.toFixed(2)} (${status.forDate})`
+              );
+            }
+          : undefined,
         getSystemBlocks: () => {
           // Conversational mode prompt + personality overlay (only
           // when not "nice"). Same precedence rules as the chat path.
