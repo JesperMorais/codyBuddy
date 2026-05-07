@@ -27,6 +27,7 @@
 // loop so the routing logic can be exercised on its own.
 
 import type { BuddyReply } from "./anthropic.js";
+import type { UsageRecord } from "./telemetry.js";
 
 /** Cheap classifier+responder. The Haiku-tier verdict is one of:
  *    - {escalate: true}    → router must call Sonnet for the actual reply
@@ -38,6 +39,11 @@ import type { BuddyReply } from "./anthropic.js";
  */
 export interface HaikuClassifier {
   classify(payload: object, systemBlocks: string[]): Promise<HaikuVerdict>;
+  /** Optional — implementers can expose the most recent classify()
+   *  call's (model, usage) so the router's getLastTokenUsage() can
+   *  surface it to per-turn telemetry. Stubs that don't issue API
+   *  calls (e.g. AlwaysEscalateHaiku) leave this undefined. */
+  getLastUsage?(): UsageRecord | undefined;
 }
 
 export type HaikuVerdict =
@@ -52,6 +58,8 @@ export interface StreamingResponder {
     payload: object,
     signal?: AbortSignal
   ): AsyncIterable<string>;
+  /** Optional — see HaikuClassifier.getLastUsage. */
+  getLastUsage?(): UsageRecord | undefined;
 }
 
 export interface TieredRouterOptions {
@@ -169,6 +177,22 @@ export class TieredRouter {
    *  the first route() call. */
   getLastOutcome(): RouteOutcome | undefined {
     return this.lastOutcome;
+  }
+
+  /** Combined token usage for the most recent turn, pulling from the
+   *  optional `getLastUsage` hooks the classifier and responder may
+   *  expose — Task 16.1.2. The audio host reads this in its
+   *  recordTurn() to populate haikuModel/haikuUsage/sonnetModel/
+   *  sonnetUsage on the turns.jsonl entry. Either field may be
+   *  undefined: stub classifiers and Ollama (which doesn't yet
+   *  surface usage) skip cleanly. */
+  getLastTokenUsage(): { haiku?: UsageRecord; sonnet?: UsageRecord } {
+    const result: { haiku?: UsageRecord; sonnet?: UsageRecord } = {};
+    const haikuUsage = this.opts.haiku.getLastUsage?.();
+    if (haikuUsage) result.haiku = haikuUsage;
+    const sonnetUsage = this.opts.sonnet.getLastUsage?.();
+    if (sonnetUsage) result.sonnet = sonnetUsage;
+    return result;
   }
 
   private estimateTranscriptTokens(p: RouterPayload): number {

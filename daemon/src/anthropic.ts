@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { Telemetry, type UsageLike } from "./telemetry.js";
+import { Telemetry, type UsageLike, type UsageRecord } from "./telemetry.js";
 import type { MisconceptionMap } from "./memory.js";
 
 export interface BuddyReply {
@@ -79,11 +79,24 @@ export class AnthropicClient implements AiClient {
   private client: Anthropic;
   private model: string;
   private telemetry: Telemetry;
+  /** Last askStream final-message usage. Cleared at the start of
+   *  each askStream call so getLastUsage() reflects the most recent
+   *  streamed turn — Task 16.1.2. */
+  private lastStreamUsage?: UsageRecord;
 
   constructor(apiKey: string, model: string, opts: { telemetry?: Telemetry } = {}) {
     this.client = new Anthropic({ apiKey });
     this.model = model;
     this.telemetry = opts.telemetry ?? new Telemetry();
+  }
+
+  /** Returns the (model, usage) for the most recent askStream call,
+   *  or undefined if none has completed since construction. The
+   *  TieredRouter consumes this via the optional getLastUsage hook
+   *  on `StreamingResponder` so the audio host can write accurate
+   *  per-turn token counts to turns.jsonl. */
+  getLastUsage(): UsageRecord | undefined {
+    return this.lastStreamUsage;
   }
 
   async ask(
@@ -158,6 +171,9 @@ export class AnthropicClient implements AiClient {
     triggerPayload: object,
     signal?: AbortSignal
   ): AsyncIterable<string> {
+    // Reset per-call so an aborted call doesn't leak the previous
+    // turn's usage into the next one's getLastUsage() read.
+    this.lastStreamUsage = undefined;
     const blocks = systemBlocks
       .filter((b) => b && b.length > 0)
       .map((text) => ({
@@ -225,14 +241,17 @@ export class AnthropicClient implements AiClient {
     }
   }
 
-  /** Subscribes to the SDK's finalMessage promise and records the
-   *  usage block to telemetry. Errors (aborted stream, network) are
-   *  swallowed — the live trigger path mustn't be blocked by a
-   *  telemetry failure. */
+  /** Subscribes to the SDK's finalMessage promise, records usage to
+   *  telemetry AND stashes a (model, usage) snapshot the
+   *  TieredRouter can read via getLastUsage(). Errors (aborted
+   *  stream, network) are swallowed — the live trigger path mustn't
+   *  be blocked by a telemetry failure. */
   private async recordStreamUsage(stream: { finalMessage: () => Promise<{ usage?: unknown }> }): Promise<void> {
     try {
       const final = await stream.finalMessage();
-      this.telemetry.record("askStream", this.model, (final.usage ?? {}) as UsageLike);
+      const usage = (final.usage ?? {}) as UsageLike;
+      this.telemetry.record("askStream", this.model, usage);
+      this.lastStreamUsage = { model: this.model, usage };
     } catch {
       // ignore — usage isn't recoverable on aborted streams
     }
