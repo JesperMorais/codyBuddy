@@ -153,9 +153,9 @@ if [ "$SKIP_VOICE" = "0" ]; then
     "$venv_py" -m pip install -e "$VOICE_DIR" --quiet
     info "voice base deps installed ✓"
     info "Optional extras (run later if you want voice loops):"
-    info "  voice/setup-piper.ps1   — Piper TTS  (Windows; sh equivalent TBD)"
-    info "  voice/setup-whisper.ps1 — Whisper STT (Windows; sh equivalent TBD)"
-    info "  voice/setup-xtts.ps1    — XTTS-v2 (~2GB; Windows; sh equivalent TBD)"
+    info "  bash voice/setup-piper.sh   — Piper TTS"
+    info "  bash voice/setup-whisper.sh — Whisper STT (builds whisper.cpp from source; needs git+cmake)"
+    info "  bash voice/setup-xtts.sh    — XTTS-v2 (~2GB)"
 fi
 
 # ---- Pinned-model download -------------------------------------
