@@ -161,10 +161,22 @@ fi
 # ---- Pinned-model download -------------------------------------
 
 if [ -f "$MODELS_MANIFEST" ]; then
-    info "Reading $MODELS_MANIFEST (Task 15.10 manifest detected)"
-    warn "Model-download step is a stub until Task 15.10 ships the manifest schema."
+    if [ "$SKIP_VOICE" = "1" ]; then
+        info "Skipping pinned-model download (--skip-voice)."
+    else
+        info "Downloading pinned models per $MODELS_MANIFEST"
+        # Task 16.3.1: hand off to the Node downloader. It streams each
+        # entry to disk, verifies size_bytes, and verifies sha256 — entries
+        # whose hash is still TBD-pinned are downloaded and size-checked
+        # but the hash check is skipped. Idempotent: cached files with
+        # matching hash are reported and skipped.
+        if ! node "$HERE/daemon/scripts/fetch-models.mjs" "$MODELS_MANIFEST" "$HERE"; then
+            err "Pinned-model download failed (see lines above). Re-run setup.sh once the network is available, or set --skip-voice for a chat-only install."
+            exit 1
+        fi
+    fi
 else
-    info "voice/models.json not present — skipping model download (Task 15.10 will add it)."
+    info "voice/models.json not present — skipping model download."
 fi
 
 # ---- .env bootstrap --------------------------------------------
