@@ -10,7 +10,8 @@
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
     "changelog": "node scripts/gen-changelog.mjs",
-    "changelog:check": "node scripts/gen-changelog.mjs --check"
+    "changelog:check": "node scripts/gen-changelog.mjs --check",
+    "doctor": "node scripts/doctor.mjs"
   },
   "packageManager": "pnpm@9.0.0",
   "engines": {
