@@ -1,0 +1,68 @@
+{
+  "$schema": "./models.schema.json",
+  "comment": "Pinned model manifest — Task 15.10. Bumping a model = one PR editing this file. The daemon verifies SHA256 of every entry whose `path` exists on disk; a mismatch refuses startup with `model checksum mismatch: <name>`. Files that haven't been downloaded yet are skipped — the chat-only path doesn't need them. setup.{ps1,sh} reads this manifest to drive downloads.",
+  "models": [
+    {
+      "name": "kokoro-v1.0",
+      "version": "1.0",
+      "path": "voice/kokoro-v1.0.onnx",
+      "url": "https://huggingface.co/thewh1teagle/kokoro-onnx/resolve/main/kokoro-v1.0.onnx",
+      "sha256": "TBD-fill-in-when-downloading",
+      "size_bytes": 311000000,
+      "license": "Apache-2.0",
+      "engine": "kokoro"
+    },
+    {
+      "name": "kokoro-voices-v1.0",
+      "version": "1.0",
+      "path": "voice/voices-v1.0.bin",
+      "url": "https://huggingface.co/thewh1teagle/kokoro-onnx/resolve/main/voices-v1.0.bin",
+      "sha256": "TBD-fill-in-when-downloading",
+      "size_bytes": 27000000,
+      "license": "Apache-2.0",
+      "engine": "kokoro"
+    },
+    {
+      "name": "whisper-base-en",
+      "version": "ggml-base.en",
+      "path": "voice/whisper/ggml-base.en.bin",
+      "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin",
+      "sha256": "TBD-fill-in-when-downloading",
+      "size_bytes": 148000000,
+      "license": "MIT",
+      "engine": "whisper"
+    },
+    {
+      "name": "silero-vad",
+      "version": "5.0",
+      "path": "voice/.venv/lib/silero-vad/silero_vad.onnx",
+      "url": "https://github.com/snakers4/silero-vad/raw/master/files/silero_vad.onnx",
+      "sha256": "TBD-fill-in-when-downloading",
+      "size_bytes": 1700000,
+      "license": "MIT",
+      "engine": "vad"
+    },
+    {
+      "name": "openwakeword-hey-buddy",
+      "version": "0.1.0",
+      "path": "voice/openwakeword/hey_buddy.tflite",
+      "url": "https://github.com/dscripka/openWakeWord/raw/main/openwakeword/resources/models/hey_jarvis.tflite",
+      "sha256": "TBD-fill-in-when-downloading",
+      "size_bytes": 950000,
+      "license": "Apache-2.0",
+      "engine": "wake-word",
+      "comment": "Placeholder URL until the project ships a hey_buddy.tflite — defaults to hey_jarvis until then."
+    },
+    {
+      "name": "xtts-v2",
+      "version": "2.0.2",
+      "path": "voice/xtts/model.pth",
+      "url": "https://huggingface.co/coqui/XTTS-v2/resolve/main/model.pth",
+      "sha256": "TBD-fill-in-when-downloading",
+      "size_bytes": 1860000000,
+      "license": "CPML",
+      "engine": "xtts",
+      "comment": "Coqui Public Model License — non-commercial. Project ships the pointer; users opt in by running voice/setup-xtts.ps1."
+    }
+  ]
+}
