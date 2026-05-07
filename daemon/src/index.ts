@@ -18,6 +18,12 @@ import { TurnTelemetry } from "./turn-telemetry.js";
 import { RollingCostRate } from "./cost-rate.js";
 import { DemoClient } from "./demo-client.js";
 import { DemoFallbackClient } from "./demo-fallback.js";
+import {
+  findManifest,
+  loadManifest,
+  ModelChecksumError,
+  verifyManifest,
+} from "./models-manifest.js";
 import { join } from "node:path";
 import { existsSync } from "node:fs";
 import { findVoiceDir, spawnVoiceSidecar } from "./voice-sidecar.js";
@@ -34,6 +40,40 @@ const __dirname = (() => {
     return dirname(process.execPath);
   }
 })();
+
+// Task 15.10: verify pinned model checksums BEFORE we boot the
+// real daemon. A corrupted download must refuse startup with the
+// spec'd error message rather than degrading silently. Missing
+// models and TBD-pinned entries are skipped — chat-only installs
+// don't ship voice models, and pre-pinned entries land before all
+// SHAs are known.
+try {
+  const manifestPath = findManifest(__dirname);
+  if (manifestPath) {
+    const manifest = loadManifest(manifestPath);
+    if (manifest) {
+      const baseDir = dirname(dirname(manifestPath)); // …/voice/.. → repo root
+      const result = verifyManifest(manifest, baseDir);
+      if (result.checked > 0) {
+        console.log(
+          `[buddy-daemon] model manifest verified: ${result.checked} checked, ${result.skipped_tbd} TBD, ${result.skipped_missing} not downloaded.`
+        );
+      }
+    }
+  }
+} catch (err) {
+  if (err instanceof ModelChecksumError) {
+    console.error(`[buddy-daemon] ${err.message}`);
+    process.exit(1);
+  }
+  // Schema errors / IO errors aren't blocking — a bad manifest
+  // is a maintainer bug, not the user's fault. Log and continue.
+  console.error(
+    `[buddy-daemon] model manifest verification skipped: ${
+      err instanceof Error ? err.message : String(err)
+    }`
+  );
+}
 
 const provider = (process.env.BUDDY_PROVIDER ?? "anthropic").toLowerCase();
 if (provider !== "anthropic" && provider !== "ollama") {
