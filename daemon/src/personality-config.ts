@@ -98,20 +98,36 @@ export function parsePersonalityConfig(
 }
 
 /** Read `<dir>/<name>.json` for each given personality name and
- *  return a `name → PersonalityConfig` map. Throws on the FIRST
- *  bad config (missing file, invalid JSON, schema violation) so a
- *  bad config can never silently degrade the live audio path. */
+ *  return a `name → PersonalityConfig` map.
+ *
+ *  Missing config files are NOT fatal (Task 16.2): a personality
+ *  whose .md was loaded from the ollama-only side-directory (e.g.
+ *  `personalities-ollama/nsfw.md`) doesn't ship a sibling .json
+ *  next to the *base* personalities, and treating that as fatal
+ *  meant `BUDDY_PROVIDER=ollama` would crash on boot. Instead we
+ *  warn and skip — the TtsBridge already falls back to its
+ *  constructor backend when no per-personality config is present,
+ *  so the user gets a working buddy, just on the default voice.
+ *
+ *  We DO still throw on a present-but-malformed config (invalid
+ *  JSON, schema violation). A bad-syntax JSON is a maintainer bug,
+ *  not an opt-out — better to fail loudly than silently fall back.
+ *
+ *  `log` is an optional override for the warn channel (defaults to
+ *  console.warn). Tests pass a recording function. */
 export function loadPersonalityConfigs(
   dir: string,
-  names: Iterable<string>
+  names: Iterable<string>,
+  log: (line: string) => void = (line) => console.warn(line)
 ): Map<string, PersonalityConfig> {
   const out = new Map<string, PersonalityConfig>();
   for (const name of names) {
     const path = join(dir, `${name}.json`);
     if (!existsSync(path)) {
-      throw new Error(
-        `personality '${name}': config file missing at ${path}`
+      log(
+        `[personality-config] '${name}': no voice config at ${path}; falling back to bridge default.`
       );
+      continue;
     }
     let raw: unknown;
     try {

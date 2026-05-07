@@ -140,11 +140,64 @@ test("12.1 parsePersonalityConfig rejects non-object input", () => {
   }
 });
 
-test("12.1 loader throws on missing config file with the path in the error", () => {
+test("16.2 loader skips missing config files with a warn log (NOT a throw)", () => {
+  // Pre-16.2 the loader threw on missing files, which crashed the
+  // daemon on boot when BUDDY_PROVIDER=ollama loaded
+  // personalities-ollama/nsfw.md without a sibling .json next to the
+  // base personalities. The fix: warn and skip — TtsBridge already
+  // falls back to its constructor backend when no per-personality
+  // config is present.
   const dir = tempDir();
+  const logs = [];
+  const configs = loadPersonalityConfigs(
+    dir,
+    ["missing"],
+    (line) => logs.push(line)
+  );
+  assert.equal(configs.size, 0, "missing config must NOT add an entry");
+  assert.equal(logs.length, 1, "must emit exactly one warn line");
+  assert.match(
+    logs[0],
+    /missing.*\.json.*falling back/,
+    `expected warn log to name the missing path; got ${JSON.stringify(logs[0])}`
+  );
+});
+
+test("16.2 loader still throws on a present-but-malformed JSON (the warn-skip is missing-file ONLY)", () => {
+  const dir = tempDir();
+  writeFileSync(join(dir, "broken.json"), "{not json,,,");
   assert.throws(
-    () => loadPersonalityConfigs(dir, ["missing"]),
-    /missing at .*missing\.json/i
+    () => loadPersonalityConfigs(dir, ["broken"]),
+    /invalid JSON/i,
+    "malformed JSON is a maintainer bug, not an opt-out — must throw"
+  );
+});
+
+test("16.2 SPEC HEADLINE: loadPersonalities + loadPersonalityConfigs with provider=ollama doesn't crash even when nsfw lacks a base-dir config", async () => {
+  // This is the exact boot path index.ts takes. Under provider=ollama
+  // personalities includes 'nsfw' (from personalities-ollama/), but
+  // its sibling JSON only exists in the ollama-only directory (or
+  // not at all). The combined call must succeed.
+  const { loadPersonalities } = await import("../dist/personalities-loader.js");
+  const baseDir = join(__dirname, "..", "prompts");
+  const { personalities } = loadPersonalities(baseDir, "ollama");
+  assert.ok(personalities.has("nsfw"), "ollama provider should load nsfw");
+
+  // The whole call chain must succeed with the warn-and-skip posture.
+  const personalitiesDir = join(baseDir, "personalities");
+  const logs = [];
+  const configs = loadPersonalityConfigs(
+    personalitiesDir,
+    personalities.keys(),
+    (line) => logs.push(line)
+  );
+  // Personalities WITH a config get an entry; nsfw (no base-dir
+  // config) gets skipped + warned.
+  assert.ok(configs.has("nice"), "nice should still load");
+  assert.ok(!configs.has("nsfw"), "nsfw is skipped (no base-dir config)");
+  assert.ok(
+    logs.some((l) => /'nsfw'/.test(l)),
+    `expected nsfw to surface in logs; got ${JSON.stringify(logs)}`
   );
 });
 
