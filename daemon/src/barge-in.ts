@@ -22,20 +22,33 @@
 //     speech.start arrives while a previous trigger() is still
 //     awaiting cancellers, it's intentionally a no-op (we're already
 //     mid-shutdown; firing again would just re-call killed processes).
+//   - Per-canceller timeout (Task 16.10): if any individual canceller
+//     hangs past `cancellerTimeoutMs` (default 100ms — the spec budget),
+//     trigger() abandons it (Promise.race against a timer) and the
+//     `inFlight` flag clears so subsequent speech.start events aren't
+//     dropped indefinitely. The offender is logged by name so a stuck
+//     TTS dispose / WS close is attributable.
 
 export type Canceller = () => void | Promise<void>;
 
 export interface BargeInOptions {
   log?: (line: string) => void;
+  /** Per-canceller timeout in milliseconds. Defaults to 100ms — the
+   *  spec's barge-in budget. A canceller that hasn't settled by then
+   *  is abandoned (its name is logged) so a single hung canceller
+   *  cannot wedge the conversation loop in INTERRUPTED forever. */
+  cancellerTimeoutMs?: number;
 }
 
 export class BargeInController {
   private cancellers: Array<{ name: string; fn: Canceller }> = [];
   private inFlight = false;
   private log: (line: string) => void;
+  private cancellerTimeoutMs: number;
 
   constructor(opts: BargeInOptions = {}) {
     this.log = opts.log ?? ((l) => console.log(l));
+    this.cancellerTimeoutMs = opts.cancellerTimeoutMs ?? 100;
   }
 
   /** Register a canceller. The `name` is used in error logs so a
@@ -63,8 +76,11 @@ export class BargeInController {
   }
 
   /** Fire every registered canceller concurrently. Resolves to the
-   *  wall-clock elapsed ms once all cancellers have settled. A
-   *  canceller that throws is logged but never blocks the others.
+   *  wall-clock elapsed ms once all cancellers have settled (or been
+   *  abandoned via timeout — see `cancellerTimeoutMs`). A canceller
+   *  that throws is logged but never blocks the others. A canceller
+   *  that hangs past the per-canceller timeout is abandoned (logged
+   *  by name) so the controller cannot get stuck in `inFlight=true`.
    *  Re-entrant calls (a second trigger() while the first is still
    *  running) resolve to 0 immediately — the work is already in
    *  progress. */
@@ -74,14 +90,41 @@ export class BargeInController {
     this.inFlight = true;
     const startedAt = Date.now();
     const snapshot = [...this.cancellers];
+    const timeoutMs = this.cancellerTimeoutMs;
     try {
       await Promise.allSettled(
         snapshot.map(async ({ name, fn }) => {
+          // Per-canceller race: bound each invocation by `timeoutMs` so
+          // a stuck canceller (e.g. TTS dispose blocked on a slow WS
+          // close) never wedges trigger(). The work itself isn't
+          // killed — JS can't unilaterally cancel an async function —
+          // but we stop awaiting it, the inFlight flag clears, and
+          // future speech.start events fire normally.
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          const timedOut = Symbol("barge-in:timeout");
+          const timeout = new Promise<typeof timedOut>((resolve) => {
+            timer = setTimeout(() => resolve(timedOut), timeoutMs);
+            timer.unref?.();
+          });
           try {
-            await fn();
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            this.log(`[barge-in] canceller ${name} threw: ${msg}`);
+            const result = await Promise.race([
+              (async () => {
+                try {
+                  await fn();
+                } catch (err) {
+                  const msg = err instanceof Error ? err.message : String(err);
+                  this.log(`[barge-in] canceller ${name} threw: ${msg}`);
+                }
+              })(),
+              timeout,
+            ]);
+            if (result === timedOut) {
+              this.log(
+                `[barge-in] canceller ${name} timed out after ${timeoutMs}ms — abandoning`
+              );
+            }
+          } finally {
+            if (timer !== undefined) clearTimeout(timer);
           }
         })
       );

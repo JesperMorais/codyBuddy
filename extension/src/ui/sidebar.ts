@@ -14,19 +14,30 @@ export interface SidebarControls {
 }
 
 /**
- * Coarse-grained UI state for the sidebar's status pill (Task 14.2).
+ * Coarse-grained UI state for the sidebar's status pill (Task 14.2,
+ * extended in 16.1.8 with `interrupted` and `quiet` from the
+ * voice-loop's onTransition broadcasts).
  * Mapped to user-facing labels by `BuddySidebarProvider.labelFor`:
- *   idle      → "Ready"
- *   down      → "Daemon down"
- *   listening → "I'm listening…"
- *   thinking  → "Buddy is thinking…"
- *   speaking  → "Buddy is speaking…"
+ *   idle        → "Ready"
+ *   down        → "Daemon down"
+ *   listening   → "I'm listening…"
+ *   thinking    → "Buddy is thinking…"
+ *   speaking    → "Buddy is speaking…"
+ *   interrupted → "Interrupted"
+ *   quiet       → "Quiet (5min idle)"
  *
  * The pill reflects the buddy's current activity, not just whether
  * the daemon process is alive — the old daemon-up status-bar icon
  * stays for the VS Code status bar; this is the in-sidebar surface.
  */
-export type BuddyState = "idle" | "down" | "listening" | "thinking" | "speaking";
+export type BuddyState =
+  | "idle"
+  | "down"
+  | "listening"
+  | "thinking"
+  | "speaking"
+  | "interrupted"
+  | "quiet";
 
 export class BuddySidebarProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = "coding-buddy.sidebar";
@@ -183,6 +194,10 @@ export class BuddySidebarProvider implements vscode.WebviewViewProvider {
         return "Buddy is thinking…";
       case "speaking":
         return "Buddy is speaking…";
+      case "interrupted":
+        return "Interrupted";
+      case "quiet":
+        return "Quiet (5min idle)";
       case "down":
         return "Daemon down";
       case "idle":
@@ -313,6 +328,9 @@ export class BuddySidebarProvider implements vscode.WebviewViewProvider {
   #buddy-state[data-state="listening"]::before { background: var(--vscode-charts-green); animation: pulse 1.2s ease-in-out infinite; }
   #buddy-state[data-state="thinking"]::before  { background: var(--vscode-charts-yellow); animation: pulse 1.2s ease-in-out infinite; }
   #buddy-state[data-state="speaking"]::before  { background: var(--vscode-charts-purple); animation: pulse 1.2s ease-in-out infinite; }
+  #buddy-state[data-state="interrupted"]::before { background: var(--vscode-charts-orange); animation: pulse 0.6s ease-in-out infinite; }
+  #buddy-state[data-state="quiet"]::before     { background: var(--vscode-descriptionForeground); }
+  #buddy-state[data-state="quiet"]             { opacity: 0.65; }
   #buddy-state[data-state="down"]::before      { background: var(--vscode-errorForeground); }
   #buddy-state[data-state="down"] { color: var(--vscode-errorForeground); }
   /* Task 15.4: demo-mode watermark sits above the status pill so

@@ -249,6 +249,26 @@ export function activate(ctx: vscode.ExtensionContext): void {
     sidebar.setDemoMode(active);
   });
 
+  bridge.onLoopState(({ state }) => {
+    // Task 16.1.8: voice-loop transition — drive the sidebar pill
+    // from the actual conversation state. We accept only the
+    // documented wire labels so a stray daemon doesn't smuggle an
+    // arbitrary string into the UI; unknown states fall back to the
+    // last health-derived state. The voice-loop broadcast is
+    // additive: chat-path triggers below can still override the
+    // pill while a chat reply is in flight.
+    if (
+      state === "idle" ||
+      state === "listening" ||
+      state === "thinking" ||
+      state === "speaking" ||
+      state === "interrupted" ||
+      state === "quiet"
+    ) {
+      sidebar.setBuddyState(state);
+    }
+  });
+
   bridge.onAudioOwner(({ owner, backend }) => {
     if (owner === "daemon") {
       sidebar.setVoice(false);

@@ -13,11 +13,6 @@
 // MVP bar in TASKS.md item 16.1.
 //
 // Deliberately deferred to 16.1.x sub-items (still listed in TASKS.md):
-//   - WakeWordGate filtering of STT finals
-//   - BackchannelController periodic scheduler
-//   - AutoQuietGate / DailyCostCap enforcement
-//   - Real HaikuClassifier impl (currently always-escalate stub)
-//   - Per-turn token-usage capture (router doesn't yet surface usage)
 //   - Real audio device wiring (mic → VAD WS, TTS chunks → speaker)
 //   - Sidebar status pill driven by loop transitions
 
@@ -32,6 +27,13 @@ import type { TurnTelemetry } from "./turn-telemetry.js";
 import type { UsageRecord } from "./telemetry.js";
 import type { WakeWordGate } from "./wake-word.js";
 import type { BackchannelController } from "./backchannel.js";
+import type { AutoQuietGate } from "./auto-quiet.js";
+import {
+  applyCapDowngrade,
+  type CapStatus,
+  type DailyCostCap,
+  type Suspendable,
+} from "./daily-cost-cap.js";
 
 /** Narrow shape of VadBridge that the host actually uses. Tests
  *  pass a tiny fake; production passes the real bridge. */
@@ -116,7 +118,69 @@ export interface AudioHostDeps {
    *  3s threshold is observed within one frame. 0 disables the
    *  host-driven setInterval (tests drive `tick()` manually). */
   backchannelTickMs?: number;
+  /** Optional auto-quiet gate (Task 16.1.5). When provided, STT
+   *  finals also pass through `gate.shouldForwardTranscript(text)`
+   *  before reaching the loop. After 5min of silence the gate
+   *  drops to QUIET; transcripts under 24 chars (or missing the
+   *  configured wake-word) are dropped until activity resumes.
+   *  VAD speech-start fires `noteActivity` so a returning user
+   *  resumes immediately. Omitted preserves the 16.1 MVP
+   *  always-forward behaviour. */
+  autoQuiet?: AutoQuietGate;
+  /** Optional daily-cost cap (Task 16.1.6). When provided, the host
+   *  consults `cap.status()` after every per-turn telemetry append
+   *  and, on a hit-edge or clear-edge transition, calls
+   *  `applyCapDowngrade(status, [loop, ...capSuspendables])` so the
+   *  voice loop AND any extra suspendables (typically the chat-path
+   *  TtsBridge) flip suspension together. The host fires
+   *  `onCapStateChange` on each transition so the wiring layer can
+   *  broadcast a `capState` WS event and persist to disk. Omitting
+   *  the cap preserves the prior behaviour (no enforcement). */
+  dailyCostCap?: DailyCostCap;
+  /** Extra suspendables to flip alongside the host-owned
+   *  ConversationLoop on cap-state transitions. Production passes
+   *  the chat-path TtsBridge here so a voice-driven cap-hit also
+   *  silences chat replies. */
+  capSuspendables?: Suspendable[];
+  /** Fires once per cap-state transition (hit-edge AND clear-edge).
+   *  The host calls it with the fresh status; the wiring layer
+   *  broadcasts `{type: "capState", state: "hit"|"ok", ...}` and
+   *  writes ~/.coding-buddy/daily-cost.json. */
+  onCapStateChange?: (status: CapStatus) => void;
+  /** Fires on every loop state transition with the lowercase wire
+   *  name (Task 16.1.8). Production wires this to
+   *  `wss.broadcastLoopState`, which sends a
+   *  `{type: "loopState", state: "idle|listening|thinking|speaking|interrupted|quiet"}`
+   *  frame to every connected webview. The sidebar's status pill
+   *  reflects the actual conversation state instead of just the
+   *  legacy daemon-up signal. The host emits `quiet` whenever the
+   *  optional `autoQuiet` gate reports QUIET — the loop itself has
+   *  no QUIET state, but the gate's posture is what the user wants
+   *  to see. */
+  onLoopState?: (state: LoopWireState) => void;
   log?: (line: string) => void;
+}
+
+/** Lowercase wire format the sidebar pill consumes. Mirrors the
+ *  ConversationLoop's state-machine names plus `quiet` from the
+ *  autoQuiet gate. */
+export type LoopWireState =
+  | "idle"
+  | "listening"
+  | "thinking"
+  | "speaking"
+  | "interrupted"
+  | "quiet";
+
+/** Pure helper — lowercase wire name for a loop state, with the
+ *  autoQuiet gate's QUIET posture overriding IDLE. Exported only for
+ *  tests. */
+export function mapLoopStateToWire(
+  state: ConversationState,
+  gate?: AutoQuietGate
+): LoopWireState {
+  if (state === "IDLE" && gate && gate.state() === "QUIET") return "quiet";
+  return state.toLowerCase() as LoopWireState;
 }
 
 /**
@@ -142,6 +206,10 @@ export class AudioHost {
    *  Held so dispose() can clear it. Undefined when the controller
    *  isn't wired or `backchannelTickMs === 0`. */
   private backchannelTimer?: NodeJS.Timeout;
+  /** Last observed cap-hit state. `undefined` = never checked yet,
+   *  so the first observed status counts as a transition iff it's
+   *  a hit (ensures boot-time hits notify the wiring layer). */
+  private lastCapHit?: boolean;
 
   constructor(private deps: AudioHostDeps) {
     const log = deps.log ?? (() => {});
@@ -166,10 +234,18 @@ export class AudioHost {
       this.loop.speechStart();
       // Task 16.1.4: drive backchannel from VAD speech-start.
       deps.backchannel?.notifySpeechStart();
+      // Task 16.1.5: speech-start is a sign of life — resets the
+      // auto-quiet silence countdown so a returning user doesn't
+      // get filtered on their first transcript.
+      deps.autoQuiet?.noteActivity();
     });
     deps.vad.onSpeechEnd(() => {
       this.loop.speechEnd();
       deps.backchannel?.notifySpeechEnd();
+      // Spec also says speech-end resumes the gate; noteActivity is
+      // idempotent so calling it on both edges keeps the silence
+      // window aligned with reality.
+      deps.autoQuiet?.noteActivity();
     });
     deps.stt.onFinal((text) => {
       // Task 16.1.3: gate STT finals through the optional wake-word
@@ -183,6 +259,17 @@ export class AudioHost {
         ? deps.wakeWordGate.forward(text).text
         : text;
       if (forwarded === null) return;
+      // Task 16.1.5: after the wake-word gate clears the transcript
+      // for the LLM-forwarding path, also consult the auto-quiet
+      // gate. After 5min of silence the gate enters QUIET and drops
+      // short transcripts (likely VAD misfires or backchannel
+      // murmurs); the first long transcript or a noteActivity()
+      // call resumes ACTIVE. Both gates are independently optional
+      // — omitting either restores the previous layer's behaviour.
+      if (deps.autoQuiet) {
+        const decision = deps.autoQuiet.shouldForwardTranscript(forwarded);
+        if (decision.dropped) return;
+      }
       // The conversation loop is async-safe with respect to
       // transcript() — fire-and-forget is fine.
       void this.loop.transcript(forwarded);
@@ -194,6 +281,11 @@ export class AudioHost {
       // forwarding every transition preserves its per-segment latch.
       deps.backchannel?.notifyState(next);
       this.observeTransition(prev, next);
+      // Task 16.1.8: emit the lowercase wire state so the sidebar
+      // pill reflects the actual conversation state. The gate's
+      // QUIET posture takes precedence over IDLE — it's a more
+      // informative pill label.
+      this.emitLoopState(next);
     });
 
     // Task 16.1.4: periodic tick so the controller can fire when
@@ -216,6 +308,25 @@ export class AudioHost {
     if (this.backchannelTimer) {
       clearInterval(this.backchannelTimer);
       this.backchannelTimer = undefined;
+    }
+  }
+
+  /** Map a ConversationState to the lowercase wire format and fire
+   *  the onLoopState callback. When the optional autoQuiet gate is
+   *  in QUIET we emit "quiet" instead of "idle" — the gate's
+   *  posture is the more useful pill label. */
+  private emitLoopState(state: ConversationState): void {
+    const cb = this.deps.onLoopState;
+    if (!cb) return;
+    const wire = mapLoopStateToWire(state, this.deps.autoQuiet);
+    try {
+      cb(wire);
+    } catch (err) {
+      this.deps.log?.(
+        `[audio-host] onLoopState threw: ${
+          err instanceof Error ? err.message : String(err)
+        }`
+      );
     }
   }
 
@@ -276,11 +387,56 @@ export class AudioHost {
         }`
       );
     }
+    this.observeCapAfterTurn();
+  }
+
+  /** Task 16.1.6: post-turn daily-cap check. Reads the cap status
+   *  (which itself rescans today's telemetry — the line we just
+   *  appended is included) and, on a hit-edge or clear-edge
+   *  transition, suspends/resumes the host-owned loop plus any
+   *  extra suspendables. Fires onCapStateChange on every transition
+   *  so the wiring layer can persist to disk and broadcast WS. No-op
+   *  when no cap is wired. */
+  private observeCapAfterTurn(): void {
+    const cap = this.deps.dailyCostCap;
+    if (!cap) return;
+    let status: CapStatus;
+    try {
+      status = cap.status();
+    } catch (err) {
+      this.deps.log?.(
+        `[audio-host] cap status read failed: ${
+          err instanceof Error ? err.message : String(err)
+        }`
+      );
+      return;
+    }
+    if (this.lastCapHit === status.hit) return;
+    this.lastCapHit = status.hit;
+    const suspendables: Suspendable[] = [
+      this.loop,
+      ...(this.deps.capSuspendables ?? []),
+    ];
+    applyCapDowngrade(status, suspendables);
+    try {
+      this.deps.onCapStateChange?.(status);
+    } catch (err) {
+      this.deps.log?.(
+        `[audio-host] onCapStateChange threw: ${
+          err instanceof Error ? err.message : String(err)
+        }`
+      );
+    }
   }
 
   /** Test hook: current loop state. */
   getState(): ConversationState {
     return this.loop.getState();
+  }
+
+  /** Test hook: current wire state (post auto-quiet override). */
+  getWireState(): LoopWireState {
+    return mapLoopStateToWire(this.loop.getState(), this.deps.autoQuiet);
   }
 
   /** Test hook: wait for in-flight settle (matches loop API). */

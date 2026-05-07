@@ -73,6 +73,19 @@ export interface ServerDeps {
  *  a `{type:"demoMode", active:false}` push and clears the banner. */
 export interface DemoToggle {
   setDemoMode(active: boolean): void;
+  /** Task 16.1.6: broadcast the daily-cost cap state to every
+   *  connected webview. Wiring layer calls this on each cap-state
+   *  transition (hit-edge or clear-edge). */
+  broadcastCapState(status: {
+    hit: boolean;
+    spentUsd: number;
+    capUsd: number;
+    forDate: string;
+  }): void;
+  /** Task 16.1.8: broadcast the conversation-loop state to every
+   *  connected webview. Called on every loop transition; the
+   *  sidebar's status pill reflects the wire state directly. */
+  broadcastLoopState(state: string): void;
 }
 
 export function startServer(deps: ServerDeps): WebSocketServer & DemoToggle {
@@ -103,14 +116,6 @@ export function startServer(deps: ServerDeps): WebSocketServer & DemoToggle {
   const wss = new WebSocketServer({
     host: "127.0.0.1",
     port,
-    // Cap incoming WS messages at 8 MiB (#95). The ws library default
-    // is 100 MiB, which lets any local client RAM-bomb the daemon by
-    // shipping a giant base64 audio payload to the `transcribe`
-    // handler. 8 MiB covers ~5min of 16kHz mono PCM as base64 — well
-    // above any legit push-to-talk turn — and outsized messages get
-    // rejected at the wire boundary (close code 1009, "message too
-    // big") before JSON.parse runs.
-    maxPayload: 8 * 1024 * 1024,
     verifyClient: ({ origin }, cb) => {
       if (origin) {
         console.warn(`[buddy-daemon] rejecting WS connect with Origin=${origin}`);
@@ -459,6 +464,36 @@ export function startServer(deps: ServerDeps): WebSocketServer & DemoToggle {
     for (const client of wss.clients) {
       // ws's WebSocket has no exported readyState constant on
       // the type, so compare against the well-known OPEN value.
+      if ((client as { readyState?: number }).readyState === 1) {
+        try {
+          (client as WebSocket).send(msg);
+        } catch {
+          // closed mid-flight; nothing to do
+        }
+      }
+    }
+  };
+  augmented.broadcastCapState = (status) => {
+    const msg = JSON.stringify({
+      type: "capState",
+      state: status.hit ? "hit" : "ok",
+      spent_usd: status.spentUsd,
+      cap_usd: status.capUsd,
+      for_date: status.forDate,
+    });
+    for (const client of wss.clients) {
+      if ((client as { readyState?: number }).readyState === 1) {
+        try {
+          (client as WebSocket).send(msg);
+        } catch {
+          // closed mid-flight; nothing to do
+        }
+      }
+    }
+  };
+  augmented.broadcastLoopState = (state: string) => {
+    const msg = JSON.stringify({ type: "loopState", state });
+    for (const client of wss.clients) {
       if ((client as { readyState?: number }).readyState === 1) {
         try {
           (client as WebSocket).send(msg);

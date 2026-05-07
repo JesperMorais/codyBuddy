@@ -148,6 +148,86 @@ test("11.2 (g) trailing fragment is yielded as a final sentence on stream end", 
   ]);
 });
 
+test("16.8 (i) decimals do NOT trigger a sentence boundary mid-buffer (`It's 2.5 meters.`)", () => {
+  const buf = new SentenceBuffer();
+  // Single push: "2.5" is decimal — only the trailing period closes
+  // the sentence.
+  assert.deepEqual(buf.push("It's 2.5 meters."), ["It's 2.5 meters."]);
+  assert.equal(buf.hasPending(), false);
+});
+
+test("16.8 (i') decimals across chunk boundaries do NOT split (chunk ends after `2.`)", () => {
+  // Streaming case: the LLM may chunk between digits. The first
+  // push ends with a digit-then-period, which on its own looks like
+  // a sentence end — but the next chunk continues the number. The
+  // buffer must hold off until disambiguation lands.
+  const buf = new SentenceBuffer();
+  assert.deepEqual(buf.push("It's 2."), [], "trailing digit-period must wait for more input");
+  assert.equal(buf.hasPending(), true);
+  assert.deepEqual(buf.push("5 meters."), ["It's 2.5 meters."]);
+  assert.equal(buf.hasPending(), false);
+});
+
+test("16.8 (j) common abbreviations don't split: Dr., Mr., Mrs., St., Inc., e.g., i.e., etc.", () => {
+  // Each in its own buffer so each is independently asserted.
+  const cases = [
+    ["Dr. Smith said hi.", ["Dr. Smith said hi."]],
+    ["Mr. Jones left.", ["Mr. Jones left."]],
+    ["Mrs. Smith arrived.", ["Mrs. Smith arrived."]],
+    ["St. Louis is nice.", ["St. Louis is nice."]],
+    ["Acme Inc. announced.", ["Acme Inc. announced."]],
+    ["e.g. this is fine.", ["e.g. this is fine."]],
+    ["i.e. that means yes.", ["i.e. that means yes."]],
+    ["Cats, dogs, etc. live here.", ["Cats, dogs, etc. live here."]],
+  ];
+  for (const [input, expected] of cases) {
+    const buf = new SentenceBuffer();
+    assert.deepEqual(buf.push(input), expected, `input: ${JSON.stringify(input)}`);
+  }
+});
+
+test("16.8 (k) terminator immediately followed by a non-space character is NOT a boundary (URLs/version strings)", () => {
+  // Things like "node.js" or "v1.2.3" should not split — the
+  // terminator must be followed by whitespace, EOL, or end-of-buffer.
+  const buf = new SentenceBuffer();
+  assert.deepEqual(buf.push("Use node.js for this."), ["Use node.js for this."]);
+});
+
+test("16.8 (l) sentence-ending number followed by space emits the FIRST sentence; trailing `6.` defers to flush()", () => {
+  // The decimal-guard suppresses emission when `<digit>.` sits at
+  // end-of-buffer (ambiguous between "the number 6" and "6.x" still
+  // streaming). The first boundary `5. ` is unambiguous (whitespace
+  // follower) and emits immediately; the trailing `6.` waits and is
+  // only released by flush() — semantically correct for streams,
+  // since the LLM may continue with another digit.
+  const buf = new SentenceBuffer();
+  assert.deepEqual(buf.push("The answer is 5. The next is 6."), ["The answer is 5."]);
+  assert.equal(buf.hasPending(), true);
+  // flush() releases the held fragment at end-of-stream.
+  assert.equal(buf.flush(), "The next is 6.");
+});
+
+test("16.8 (l') sentencesFromDeltas releases a trailing `<digit>.` sentence at end-of-stream", async () => {
+  // The async-iterable wrapper is the path the conversation loop
+  // actually uses. This guards that the digit-period hold doesn't
+  // *swallow* the trailing sentence — it just defers it to flush().
+  const upstream = {
+    async *[Symbol.asyncIterator]() {
+      yield "The answer is 5. The next is 6.";
+    },
+  };
+  const out = [];
+  for await (const s of sentencesFromDeltas(upstream)) out.push(s);
+  assert.deepEqual(out, ["The answer is 5.", "The next is 6."]);
+});
+
+test("16.8 (m) abbreviation followed by capital letter still does not split (`Dr. Smith.`)", () => {
+  // Common false positive: heuristics that emit on `<terminator>
+  // <Capital>` would split "Dr. Smith." between "Dr." and "Smith.".
+  const buf = new SentenceBuffer();
+  assert.deepEqual(buf.push("Dr. Smith."), ["Dr. Smith."]);
+});
+
 test("11.2 (h) zero-length sentences never leak out (no empty strings in any push() result)", () => {
   // The buffer's invariant is "no zero-length strings". Punctuation-
   // adjacent whitespace is normalised by trim() but a degenerate
