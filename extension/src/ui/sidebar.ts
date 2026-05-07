@@ -44,6 +44,7 @@ export class BuddySidebarProvider implements vscode.WebviewViewProvider {
   private lastControls?: SidebarControls;
   private lastBuddyState: BuddyState = "idle";
   private speechEndedHandler?: () => void;
+  private lastDemoMode = false;
 
   resolveWebviewView(view: vscode.WebviewView): void {
     this.view = view;
@@ -80,6 +81,12 @@ export class BuddySidebarProvider implements vscode.WebviewViewProvider {
       type: "buddyState",
       state: this.lastBuddyState,
       label: this.labelFor(this.lastBuddyState),
+    });
+    // Re-hydrate the demo-mode watermark on reopen (Task 15.4) so
+    // the banner doesn't briefly disappear after a window reload.
+    this.view.webview.postMessage({
+      type: "demoMode",
+      active: this.lastDemoMode,
     });
     while (this.pending.length) this.post(this.pending.shift()!);
   }
@@ -154,6 +161,18 @@ export class BuddySidebarProvider implements vscode.WebviewViewProvider {
    *  this to flip the pill from "speaking" back to "idle". */
   onSpeechEnded(h: () => void): void {
     this.speechEndedHandler = h;
+  }
+
+  /** Show / hide the demo-mode watermark (Task 15.4). When
+   *  active=true, the webview renders a banner reminding the user
+   *  that replies are canned, not from Claude. */
+  setDemoMode(active: boolean): void {
+    this.lastDemoMode = active;
+    this.view?.webview.postMessage({ type: "demoMode", active });
+  }
+
+  isDemoMode(): boolean {
+    return this.lastDemoMode;
   }
 
   private labelFor(state: BuddyState): string {
@@ -296,8 +315,24 @@ export class BuddySidebarProvider implements vscode.WebviewViewProvider {
   #buddy-state[data-state="speaking"]::before  { background: var(--vscode-charts-purple); animation: pulse 1.2s ease-in-out infinite; }
   #buddy-state[data-state="down"]::before      { background: var(--vscode-errorForeground); }
   #buddy-state[data-state="down"] { color: var(--vscode-errorForeground); }
+  /* Task 15.4: demo-mode watermark sits above the status pill so
+     the user can't miss that replies are canned. Hidden by
+     default — toggled via the buddy.lastDemoMode flag. */
+  #demo-banner {
+    display: none;
+    background: var(--vscode-inputValidation-warningBackground, #5a4500);
+    color: var(--vscode-inputValidation-warningForeground, #fff);
+    border-left: 3px solid var(--vscode-charts-yellow, #c9c900);
+    padding: 4px 8px;
+    margin-bottom: 6px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-style: italic;
+  }
+  #demo-banner[data-active="true"] { display: block; }
 </style></head>
 <body>
+  <div id="demo-banner" data-active="false">demo mode &mdash; replies are canned, not from Claude.</div>
   <div id="buddy-state" data-state="idle">Ready</div>
   <div id="controls">
     <label for="mode-select">Mode</label>
@@ -564,6 +599,10 @@ export class BuddySidebarProvider implements vscode.WebviewViewProvider {
     } else if (m.type === 'buddyState') {
       // Task 14.2: status pill update.
       setBuddyState(m.state, m.label);
+    } else if (m.type === 'demoMode') {
+      // Task 15.4: toggle the demo-mode watermark.
+      const banner = document.getElementById('demo-banner');
+      if (banner) banner.dataset.active = m.active ? 'true' : 'false';
     } else if (m.type === 'testVoice') {
       const div = document.createElement('div');
       div.className = 'status';

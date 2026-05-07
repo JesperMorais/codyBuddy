@@ -80,6 +80,11 @@ export function activate(ctx: vscode.ExtensionContext): void {
     sidebar.setBuddyState(up ? "idle" : "down");
   });
 
+  bridge.onDemoMode(({ active }) => {
+    // Task 15.4: daemon flipped demo mode — propagate to sidebar.
+    sidebar.setDemoMode(active);
+  });
+
   bridge.onAudioOwner(({ owner, backend }) => {
     if (owner === "daemon") {
       sidebar.setVoice(false);

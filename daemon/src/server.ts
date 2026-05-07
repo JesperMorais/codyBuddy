@@ -47,9 +47,25 @@ export interface ServerDeps {
    * replies with zeros.
    */
   costRate?: RollingCostRate;
+  /**
+   * Initial demo-mode state (Task 15.4). When true, the server
+   * tells every connecting webview to render the canned-replies
+   * watermark. The host can flip it off later via the returned
+   * `setDemoMode` function on the wss object.
+   */
+  demoMode?: boolean;
 }
 
-export function startServer(deps: ServerDeps): WebSocketServer {
+/** Returned alongside the WebSocketServer so the host can toggle
+ *  demo mode at runtime (Task 15.4). The host calls
+ *  `wss.setDemoMode(false)` when the DemoFallbackClient reports its
+ *  first real Anthropic success — every connected webview receives
+ *  a `{type:"demoMode", active:false}` push and clears the banner. */
+export interface DemoToggle {
+  setDemoMode(active: boolean): void;
+}
+
+export function startServer(deps: ServerDeps): WebSocketServer & DemoToggle {
   const { session, tts, stt, recorder, port, votes } = deps;
   const gated = deps.gatedPersonalities ?? new Map<string, string>();
   const kokoroVoiceFor = deps.kokoroVoiceFor ?? new Map<string, string>();
@@ -63,6 +79,9 @@ export function startServer(deps: ServerDeps): WebSocketServer {
   if (initialVoice) tts.setKokoroVoice(initialVoice);
   const initialCfg = personalityVoiceConfigs.get(session.getPersonality());
   if (initialCfg) tts.setPersonalityVoiceConfig(initialCfg);
+  // Task 15.4: initial demo flag. The host can flip it later via
+  // the setDemoMode method on the returned wss object.
+  let demoMode = !!deps.demoMode;
   const wss = new WebSocketServer({ host: "127.0.0.1", port });
 
   // The modeSet ack carries every personality-axis dimension (mode,
@@ -91,6 +110,9 @@ export function startServer(deps: ServerDeps): WebSocketServer {
         backend: tts.describe(),
       })
     );
+    // Task 15.4: tell the webview about demo mode on connect so
+    // the watermark renders before the first trigger fires.
+    ws.send(JSON.stringify({ type: "demoMode", active: demoMode }));
 
     ws.on("message", async (raw) => {
       let msg: { type: string; [k: string]: unknown };
@@ -331,5 +353,24 @@ export function startServer(deps: ServerDeps): WebSocketServer {
     ws.on("close", () => console.log("[buddy-daemon] extension disconnected"));
   });
 
-  return wss;
+  // Task 15.4: monkey-patch a setDemoMode method onto the wss
+  // instance so index.ts can flip demo off (and broadcast it)
+  // when DemoFallbackClient reports its first real success.
+  const augmented = wss as WebSocketServer & DemoToggle;
+  augmented.setDemoMode = (active: boolean) => {
+    demoMode = active;
+    const msg = JSON.stringify({ type: "demoMode", active });
+    for (const client of wss.clients) {
+      // ws's WebSocket has no exported readyState constant on
+      // the type, so compare against the well-known OPEN value.
+      if ((client as { readyState?: number }).readyState === 1) {
+        try {
+          (client as WebSocket).send(msg);
+        } catch {
+          // closed mid-flight; nothing to do
+        }
+      }
+    }
+  };
+  return augmented;
 }
