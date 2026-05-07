@@ -27,6 +27,12 @@ import {
 import { join } from "node:path";
 import { existsSync } from "node:fs";
 import { findVoiceDir, spawnVoiceSidecar } from "./voice-sidecar.js";
+import { VadBridge } from "./vad-bridge.js";
+import { StreamingSttBridge } from "./stt-stream.js";
+import { StreamingTtsBridge } from "./tts-stream.js";
+import { TieredRouter } from "./tiered-router.js";
+import { AudioHost, AlwaysEscalateHaiku } from "./audio-host.js";
+import { loadConversationalPrompts } from "./conversational-prompts.js";
 
 // Resolve __dirname for both the dev path (Node ESM running from
 // daemon/dist/index.js) and the SEA bundle (Task 15.6) where
@@ -270,6 +276,93 @@ if (voiceLoop === "off") {
   console.log(
     "[buddy-daemon] voice loop disabled (BUDDY_VOICE_LOOP=off) -- chat-only install."
   );
+}
+
+// Task 16.1: minimum-viable voice-loop wiring. Constructs the
+// bridges + router + AudioHost when the user opts in via
+// `BUDDY_VOICE_LOOP=on`. This is the *first* time the loop classes
+// are instantiated in production — until now they shipped as dead
+// code with green unit tests but zero runtime presence. The
+// `auto` (default) and `off` branches preserve existing behavior so
+// upgrading to this build doesn't change any chat-only flow.
+//
+// What this wires (MVP per 16.1):
+//   - VadBridge      ws://127.0.0.1:<voicePort>/vad
+//   - StreamingSttBridge   subprocess: $BUDDY_STT_STREAM_EXE
+//   - StreamingTtsBridge   ws://127.0.0.1:<voicePort>/tts/stream
+//   - TieredRouter   sonnet=ankhrop_client; haiku=AlwaysEscalateHaiku stub
+//   - AudioHost      composes all of the above; appends one turns.jsonl
+//                    line per completed voice turn
+//
+// Deferred to 16.1.x sub-items: WakeWordGate filtering, real
+// HaikuClassifier, BackchannelController scheduler, AutoQuietGate
+// + DailyCostCap enforcement, real audio device wiring, sidebar
+// state pill, accurate per-turn token capture.
+let audioHost: AudioHost | undefined;
+if (voiceLoop === "on") {
+  const voicePort = Number(process.env.BUDDY_VOICE_PORT ?? 31416);
+  const sttExe = process.env.BUDDY_STT_STREAM_EXE;
+  if (!sttExe) {
+    console.warn(
+      "[buddy-daemon] BUDDY_VOICE_LOOP=on but BUDDY_STT_STREAM_EXE is unset — voice loop NOT started. Set the path to a streaming-whisper-shaped binary (see daemon/src/stt-stream.ts header)."
+    );
+  } else {
+    const conversationalPrompts = loadConversationalPrompts(promptsDir);
+    if (conversationalPrompts.size === 0) {
+      console.warn(
+        "[buddy-daemon] BUDDY_VOICE_LOOP=on but no conversational prompts found at daemon/prompts/conversational/ — voice loop NOT started."
+      );
+    } else {
+      const vad = new VadBridge({
+        url: `ws://127.0.0.1:${voicePort}/vad`,
+        log: (line) => console.log(line),
+      });
+      const stt = new StreamingSttBridge({
+        command: sttExe,
+        log: (line) => console.log(line),
+      });
+      const ttsStream = new StreamingTtsBridge({
+        url: `ws://127.0.0.1:${voicePort}/tts/stream`,
+        log: (line) => console.log(line),
+      });
+      const router = new TieredRouter({
+        haiku: new AlwaysEscalateHaiku(),
+        sonnet: client,
+        log: (line) => console.log(line),
+      });
+      audioHost = new AudioHost({
+        vad,
+        stt,
+        tts: ttsStream,
+        router,
+        turnTelemetry,
+        getSystemBlocks: () => {
+          // Conversational mode prompt + personality overlay (only
+          // when not "nice"). Same precedence rules as the chat path.
+          const mode = session.getMode();
+          const blocks: string[] = [];
+          const modePrompt = conversationalPrompts.get(mode);
+          if (modePrompt) blocks.push(modePrompt);
+          const personality = session.getPersonality();
+          if (personality !== "nice") {
+            const overlay = personalities.get(personality);
+            if (overlay) blocks.push(overlay);
+          }
+          return blocks;
+        },
+        getMode: () => session.getMode(),
+        getPersonality: () => session.getPersonality(),
+        getWakeWord: () => process.env.BUDDY_WAKEWORD ?? "off",
+        log: (line) => console.log(line),
+      });
+      vad.connect();
+      ttsStream.connect();
+      stt.start();
+      console.log(
+        `[buddy-daemon] voice loop wired (vad=ws://127.0.0.1:${voicePort}/vad, tts=ws://127.0.0.1:${voicePort}/tts/stream, stt=${sttExe})`
+      );
+    }
+  }
 }
 
 // Optional: supervise the voice sidecar from the daemon. Off by
