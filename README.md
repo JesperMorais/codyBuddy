@@ -18,6 +18,8 @@ extension (VS Code) ──ws──▶ daemon (Node + AiClient) ──http──�
 
 ## Quickstart — five minutes from clone to first voice turn
 
+> **Just want chat?** [Skip ahead](#minimal-install--chat-only-60-seconds) — the chat-only path takes ~60 seconds and skips Python, voice models, and the venv.
+
 Aimed at a fresh checkout on Windows 11, macOS, or Linux. The only manual step is pasting your Anthropic API key.
 
 1. **Clone and run the installer.**
@@ -62,6 +64,48 @@ Aimed at a fresh checkout on Windows 11, macOS, or Linux. The only manual step i
 That's it. Total runtime once `setup.{ps1,sh}` finishes: under five minutes.
 
 > Screenshots above are placeholders described in [`docs/screenshots/README.md`](docs/screenshots/README.md). They render as broken-image icons until someone drops in the actual PNGs — the prose still tells you what to expect.
+
+## Minimal install — chat only (60 seconds)
+
+If you only want the editor-trigger chat replies — no spoken voice, no mic, no Python — skip the voice sidecar entirely:
+
+```bash
+# Windows (PowerShell)
+git clone https://github.com/JesperMorais/codyBuddy.git
+cd codyBuddy
+pwsh -File setup.ps1 -SkipVoice
+```
+
+```bash
+# macOS / Linux
+git clone https://github.com/JesperMorais/codyBuddy.git
+cd codyBuddy
+bash setup.sh --skip-voice
+```
+
+`-SkipVoice` / `--skip-voice` skip the `voice/.venv` step and the pip install entirely. Then edit `.env`:
+
+```bash
+BUDDY_PROVIDER=anthropic
+ANTHROPIC_API_KEY=sk-ant-...
+BUDDY_TTS_BACKEND=none
+BUDDY_VOICE_LOOP=off
+```
+
+`BUDDY_VOICE_LOOP=off` is the authoritative kill-switch — even if `BUDDY_VAD_SPAWN=true` is set, the daemon won't try to spawn the voice sidecar. `BUDDY_TTS_BACKEND=none` keeps the daemon silent. The buddy still answers your trigger comments (`AI?` / `AI!` / `WHY?` / `STUCK`) and the sidebar input box — replies render as text only.
+
+You don't need Python ≥3.11, the voice venv, or any of the model files in `voice/models.json`. `pnpm doctor` will yellow-flag the voice-related lines (advisory) but still exit 0.
+
+What you get:
+- ✅ Sidebar chat (text in, text out).
+- ✅ Editor trigger comments + auto-detected anti-patterns.
+- ✅ Mode switching (tutor / architect / explainer / reviewer).
+- ✅ Personality switching (no voice rendering).
+- ❌ Spoken replies (TTS off).
+- ❌ Voice input (no microphone path).
+- ❌ Wake word, conversation loop, backchannels.
+
+Add voice later by re-running setup without `--skip-voice` and flipping `BUDDY_TTS_BACKEND=auto` and `BUDDY_VOICE_LOOP=auto` in `.env`.
 
 ## Troubleshooting
 
