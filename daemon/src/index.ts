@@ -260,12 +260,27 @@ console.log(
   `[buddy-daemon] listening on ws://127.0.0.1:${port} (model=${model}, tts=${tts.describe()}, stt=${stt.describe()})`
 );
 
+// Task 15.11: chat-only minimal install (`BUDDY_VOICE_LOOP=off`)
+// short-circuits every voice-side spawn so the daemon boots
+// without `voice/.venv` or any Python at all. The flag is the
+// authoritative kill-switch even when `BUDDY_VAD_SPAWN=true` —
+// chat-only ALWAYS wins. Default `auto` keeps existing behavior.
+const voiceLoop = (process.env.BUDDY_VOICE_LOOP ?? "auto").toLowerCase();
+if (voiceLoop === "off") {
+  console.log(
+    "[buddy-daemon] voice loop disabled (BUDDY_VOICE_LOOP=off) -- chat-only install."
+  );
+}
+
 // Optional: supervise the voice sidecar from the daemon. Off by
 // default — voice is still typically run via `pnpm dev:voice` in a
 // dedicated terminal during development. BUDDY_VAD_SPAWN=true flips
 // the daemon into "I own the python process" mode for /vad consumers.
 let voiceSidecar: ReturnType<typeof spawnVoiceSidecar> | undefined;
-if ((process.env.BUDDY_VAD_SPAWN ?? "").toLowerCase() === "true") {
+if (
+  voiceLoop !== "off" &&
+  (process.env.BUDDY_VAD_SPAWN ?? "").toLowerCase() === "true"
+) {
   const voiceDir = findVoiceDir(__dirname, existsSync);
   if (!voiceDir) {
     console.warn(
