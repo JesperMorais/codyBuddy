@@ -33,10 +33,14 @@
 // conversation loop is voice-first.
 //
 // "No orphaned audio" is the spec's invariant. Every path that
-// leaves SPEAKING calls cancelSpeak() (which the host wires to
-// StreamingTtsBridge.dispose() in production) so the audio stops
-// reaching the speakers — even when the LLM stream finished
-// happily and we just got barged in mid-sentence.
+// leaves SPEAKING (or INTERRUPTED) calls deps.cancelSpeak()
+// directly from transition() so the audio stops reaching the
+// speakers — even when the LLM stream finished happily and we just
+// got barged in mid-sentence. The host wires cancelSpeak to
+// StreamingTtsBridge.dispose() in production; that call must be
+// idempotent because the host typically also registers the same
+// canceller with the BargeInController and both will fire on
+// SPEAKING → INTERRUPTED.
 
 import { EventEmitter } from "node:events";
 import type { BargeInController } from "./barge-in.js";
@@ -84,9 +88,16 @@ export interface ConversationLoopDeps {
   /** Tell the TTS path the utterance is complete. Triggers any
    *  flush logic the bridge has (e.g. StreamingTtsBridge.finish). */
   finishUtterance: () => void;
-  /** Hard-cancel the TTS pipeline (used on barge-in). Must drop any
+  /** Hard-cancel the TTS pipeline. Invoked by the loop on every
+   *  transition that leaves SPEAKING or INTERRUPTED so the spec's
+   *  "no orphaned audio" invariant is enforced by the loop itself,
+   *  not by the host's bargeIn registration. Must drop any
    *  in-flight playback so we don't leave audio echoing into the
-   *  user's mic — the spec's "no orphaned audio" invariant. */
+   *  user's mic. Required to be idempotent: the host typically
+   *  also registers the same canceller with the BargeInController
+   *  for symmetry with other cancellers, so both will fire on
+   *  SPEAKING → INTERRUPTED. StreamingTtsBridge.dispose() (the
+   *  production wiring) is idempotent. */
   cancelSpeak: () => void;
   /**
    * Resolves when audio playback for the current utterance has
@@ -406,19 +417,30 @@ export class ConversationLoop {
     this.state = next;
     this.log(`[loop] ${prev} → ${next}`);
     this.events.emit("transition", next, prev);
-    // Special invariant: every path leaving SPEAKING / INTERRUPTED
-    // must hard-cancel TTS so we never leak audio. The
-    // INTERRUPTED case calls cancel via bargeIn.trigger() (which the
-    // host registered cancelSpeak() into); the IDLE-from-SPEAKING
-    // case happens after the natural finishUtterance(), so no extra
-    // cancel is needed. The defensive cancel below catches the rare
-    // path where finishUtterance() didn't actually drain — no
-    // double-cancel concern because cancelSpeak is idempotent in
-    // the host wiring (StreamingTtsBridge.dispose() is too).
-    if ((prev === "SPEAKING" || prev === "INTERRUPTED") && next === "IDLE") {
-      // No-op in production: finishUtterance already settled
-      // playback. Keeping the hook so a misbehaving TTS bridge can't
-      // strand audio.
+    // Spec invariant (header line 35-39): every path that leaves
+    // SPEAKING must hard-cancel TTS so we never leak audio. The
+    // SPEAKING → INTERRUPTED case is also driven via bargeIn.trigger()
+    // in speechStart() (which the host typically also registers
+    // cancelSpeak() into for symmetry with other cancellers), but we
+    // call deps.cancelSpeak() unconditionally here so a host that
+    // forgets the bargeIn.register("tts", ...) wiring still gets the
+    // invariant enforced. cancelSpeak must be idempotent in the host
+    // — StreamingTtsBridge.dispose() is — so a double-cancel from
+    // both this path and the bargeIn fan-out is safe.
+    //
+    // We also catch the SPEAKING/INTERRUPTED → IDLE paths: the natural
+    // finish runs after finishUtterance() drained playback, so this is
+    // a defensive no-op in production. Keeping the call in is the only
+    // way to make the invariant a property of the loop itself rather
+    // than of the host's wiring, which is what 16.9 calls out.
+    if (prev === "SPEAKING" || prev === "INTERRUPTED") {
+      try {
+        this.deps.cancelSpeak();
+      } catch (err) {
+        this.log(
+          `[loop] cancelSpeak threw on ${prev}→${next}: ${err instanceof Error ? err.message : err}`
+        );
+      }
     }
   }
 }

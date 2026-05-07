@@ -183,7 +183,14 @@ test("10.6 (d) barge-in during SPEAKING aborts the LLM stream and cancels TTS �
   await turn;
 
   assert.equal(abortObserved, true, "LLM stream must observe the abort signal");
-  assert.equal(ctx.cancelCalls, 1, "cancelSpeak must be called exactly once via bargeIn");
+  // 16.9: the loop now invokes cancelSpeak() directly on every path
+  // that leaves SPEAKING/INTERRUPTED, in addition to the host's
+  // bargeIn-registered canceller. cancelSpeak is required to be
+  // idempotent so the multi-call is safe; we only assert ≥1 here.
+  assert.ok(
+    ctx.cancelCalls >= 1,
+    `cancelSpeak must fire at least once on barge-in (got ${ctx.cancelCalls})`
+  );
   // We dispatched only the first sentence — the second never made it
   // through (orphaned-audio invariant).
   assert.deepEqual(ctx.speakCalls, ["First sentence."]);
@@ -308,4 +315,107 @@ test("10.6 (h) speechStart during THINKING is treated as a barge-in (LLM aborted
   await turn;
   assert.equal(ctx.loop.getState(), "LISTENING");
   assert.equal(abortObserved, true);
+});
+
+test("10.6 (i) loop calls deps.cancelSpeak even when host did not register a tts canceller on bargeIn (16.9 invariant)", async () => {
+  // Regression for task 16.9: the loop's header documents the
+  // "every path leaving SPEAKING calls cancelSpeak" invariant. The
+  // pre-16.9 implementation only relied on the host having wired
+  // cancelSpeak into bargeIn.register("tts", ...); a host that
+  // populated deps.cancelSpeak but forgot the registration would
+  // leak audio on barge-in. This test simulates exactly that
+  // misconfiguration and asserts cancelSpeak still fires.
+  const transitions = [];
+  let cancelCalls = 0;
+  const speakCalls = [];
+  const bargeIn = new BargeInController({ log: () => {} });
+  // Note: NO bargeIn.register("tts", ...) — this is the bug shape
+  // that 16.9 fixes.
+
+  const loop = new ConversationLoop({
+    bargeIn,
+    completeUtterance: (_payload, signal) => ({
+      async *[Symbol.asyncIterator]() {
+        yield "First. ";
+        for (let i = 0; i < 200; i++) {
+          if (signal.aborted) return;
+          await wait(5);
+        }
+        yield "Second.";
+      },
+    }),
+    speakSentence: async (s) => {
+      speakCalls.push(s);
+    },
+    finishUtterance: () => {},
+    cancelSpeak: () => {
+      cancelCalls += 1;
+    },
+    log: () => {},
+  });
+  loop.onTransition((next, prev) => transitions.push(`${prev}→${next}`));
+
+  loop.speechStart();
+  const turn = loop.transcript("explain it");
+  while (loop.getState() !== "SPEAKING") await wait(2);
+
+  // Barge in mid-utterance.
+  loop.speechStart();
+  await loop.awaitSettled();
+  await turn;
+
+  // The loop must have invoked deps.cancelSpeak() at least once on
+  // its way out of SPEAKING / INTERRUPTED, even though no canceller
+  // was registered with bargeIn.
+  assert.ok(
+    cancelCalls >= 1,
+    `cancelSpeak must fire from the loop itself when host forgets bargeIn registration (got ${cancelCalls})`
+  );
+  // No orphaned audio: only the first sentence was dispatched.
+  assert.deepEqual(speakCalls, ["First."]);
+  assert.ok(transitions.includes("SPEAKING→INTERRUPTED"));
+  assert.ok(transitions.includes("INTERRUPTED→LISTENING"));
+});
+
+test("10.6 (j) cancelSpeak that throws does not strand the state machine (16.9 hardening)", async () => {
+  // 16.9: cancelSpeak is invoked on every path leaving SPEAKING /
+  // INTERRUPTED. A misbehaving host that throws from cancelSpeak
+  // mustn't prevent the state machine from continuing to LISTENING.
+  const transitions = [];
+  const bargeIn = new BargeInController({ log: () => {} });
+  bargeIn.register("tts", () => {
+    /* host's normal canceller - no-op for this test */
+  });
+
+  const loop = new ConversationLoop({
+    bargeIn,
+    completeUtterance: (_payload, signal) => ({
+      async *[Symbol.asyncIterator]() {
+        yield "Hi. ";
+        for (let i = 0; i < 200; i++) {
+          if (signal.aborted) return;
+          await wait(5);
+        }
+      },
+    }),
+    speakSentence: async () => {},
+    finishUtterance: () => {},
+    cancelSpeak: () => {
+      throw new Error("boom: tts canceller broken");
+    },
+    log: () => {},
+  });
+  loop.onTransition((next, prev) => transitions.push(`${prev}→${next}`));
+
+  loop.speechStart();
+  const turn = loop.transcript("hi there");
+  while (loop.getState() !== "SPEAKING") await wait(2);
+  loop.speechStart();
+  await loop.awaitSettled();
+  await turn;
+
+  // The throw must have been swallowed; the loop progressed normally.
+  assert.equal(loop.getState(), "LISTENING");
+  assert.ok(transitions.includes("SPEAKING→INTERRUPTED"));
+  assert.ok(transitions.includes("INTERRUPTED→LISTENING"));
 });
