@@ -153,6 +153,11 @@ export class StreamingSttBridge {
       const promoted = this.lastPartial.trim();
       // Reset partial state so the next utterance starts fresh.
       this.lastPartial = "";
+      // Task 16.11: when the engine never emitted a partial (silence
+      // window, model warmup) lastPartial is "". Promoting an empty
+      // string lands as a no-op `final` event for downstream consumers
+      // (telemetry, conversation loop) — skip dispatch entirely.
+      if (promoted === "") return;
       for (const h of this.finals) h(promoted, "promoted");
     }, ms);
     this.speechEndTimer.unref?.();
