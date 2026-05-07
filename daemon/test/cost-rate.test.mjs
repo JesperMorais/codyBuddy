@@ -16,8 +16,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { WebSocket } from "ws";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const { TurnTelemetry } = await import("../dist/turn-telemetry.js");
 const { RollingCostRate } = await import("../dist/cost-rate.js");
@@ -217,7 +220,7 @@ test("13.3 (a) telemetry read failure does not throw", () => {
 
 async function bootDaemon(opts = {}) {
   const port = 33500 + Math.floor(Math.random() * 1000);
-  const promptsDir = join(import.meta.dirname, "..", "prompts");
+  const promptsDir = join(__dirname, "..", "prompts");
   const prompts = loadPromptDir(promptsDir);
   const { personalities } = loadPersonalities(promptsDir, "anthropic");
   const memDir = mkdtempSync(join(tmpdir(), "buddy-13.3-mem-"));

@@ -17,10 +17,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
+const __dirname = dirname(fileURLToPath(import.meta.url));
 const {
   shouldShowOnboarding,
   isValidApiKey,
@@ -156,7 +158,7 @@ test("15.12 ONBOARDING_DISMISSED_KEY is exported as the documented name", () => 
 test("15.12 extension package.json exposes the runOnboarding command", () => {
   const pkg = JSON.parse(
     readFileSync(
-      join(import.meta.dirname, "..", "package.json"),
+      join(__dirname, "..", "package.json"),
       "utf8"
     )
   );
