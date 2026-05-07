@@ -29,3 +29,37 @@ jobs:
 
       - name: Test
         run: pnpm test
+
+  setup-script:
+    # Task 15.1: smoke-run the one-shot installer on each supported
+    # OS. Uses --skip-voice so the matrix doesn't pay the pip-install
+    # cost three times — voice setup is itself covered by per-engine
+    # scripts (voice/setup-piper.ps1 etc.) and by Task 15.2's
+    # `pnpm doctor` once that lands. The smoke verifies prereq
+    # detection, pnpm install, and the .env.example → .env copy.
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - name: Run setup.ps1 (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: pwsh -File setup.ps1 -SkipVoice
+      - name: Run setup.sh (macOS / Linux)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: bash setup.sh --skip-voice
+      - name: Verify .env was created
+        shell: bash
+        run: test -f .env
