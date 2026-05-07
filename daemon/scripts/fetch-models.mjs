@@ -126,8 +126,13 @@ export function downloadTo(url, destPath, opts = {}) {
           const tmp = `${destPath}.partial`;
           const out = createWriteStream(tmp);
           res.pipe(out);
-          out.on("finish", () => {
-            out.close();
+          // Wait for `close` (fd actually released) — not just `finish`
+          // (data flushed). On Windows, renaming a file that still has
+          // an open WriteStream fd succeeds, but downstream lstat /
+          // rmSync calls then trip EPERM until the kernel finishes the
+          // close. See test 16.3.1 (h) for the original Windows-only
+          // failure that motivated this.
+          out.on("close", () => {
             try {
               renameSync(tmp, destPath);
               resolveP();
