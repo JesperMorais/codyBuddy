@@ -120,7 +120,17 @@ jobs:
         with:
           python-version: '3.12'
       - name: Run setup.sh (full — voice enabled)
+        # BUDDY_SETUP_SKIP_MODELS=1 short-circuits the pinned-model
+        # download added in 16.3.1 — until 16.3.2 ships real SHA256
+        # values and a workflow_dispatch-gated CI smoke job, the
+        # upstream URLs (Hugging Face, GitHub Releases) aren't a
+        # reliable CI dependency (HF returns 401 without auth on some
+        # repos). The voice install path (pip + flat-layout discovery)
+        # is what this job is here to verify; model downloads are
+        # orthogonal and are covered separately by 16.3.2.
         shell: bash
+        env:
+          BUDDY_SETUP_SKIP_MODELS: "1"
         run: bash setup.sh
       - name: Verify voice editable install
         # If voice/pyproject.toml regresses (#83-style), or main.py /

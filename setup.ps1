@@ -181,6 +181,12 @@ if (-not $SkipVoice) {
 if (Test-Path $modelsManifest) {
     if ($SkipVoice) {
         Write-Info "Skipping pinned-model download (-SkipVoice)."
+    } elseif ($env:BUDDY_SETUP_SKIP_MODELS -eq "1") {
+        # Escape hatch for CI / dev environments that don't want to pay
+        # the multi-GB upstream download (Hugging Face / GitHub releases)
+        # or that run on networks where the pinned URLs aren't reachable
+        # without auth. Mirror of the bash side (--skip-models).
+        Write-Info "Skipping pinned-model download (BUDDY_SETUP_SKIP_MODELS=1)."
     } else {
         Write-Info "Downloading pinned models per $modelsManifest"
         # Task 16.3.1: hand off to the Node downloader. It streams each
@@ -190,7 +196,7 @@ if (Test-Path $modelsManifest) {
         # matching hash are reported and skipped.
         & node "$here/daemon/scripts/fetch-models.mjs" $modelsManifest $here
         if ($LASTEXITCODE -ne 0) {
-            Write-Err "Pinned-model download failed (see lines above). Re-run setup.ps1 once the network is available, or pass -SkipVoice for a chat-only install."
+            Write-Err "Pinned-model download failed (see lines above). Re-run setup.ps1 once the network is available, set BUDDY_SETUP_SKIP_MODELS=1 to opt out, or pass -SkipVoice for a chat-only install."
             exit $LASTEXITCODE
         }
     }

@@ -163,6 +163,16 @@ fi
 if [ -f "$MODELS_MANIFEST" ]; then
     if [ "$SKIP_VOICE" = "1" ]; then
         info "Skipping pinned-model download (--skip-voice)."
+    elif [ "${BUDDY_SETUP_SKIP_MODELS:-}" = "1" ]; then
+        # Escape hatch for CI / dev environments that don't want to pay
+        # the multi-GB upstream download (Hugging Face / GitHub releases)
+        # or that run on networks where the pinned URLs aren't reachable
+        # without auth. The verifier already skips TBD-pinned entries
+        # cleanly, so the chat-only path stays functional without the
+        # downloads. Until 16.3.2 lands real hashes + a CI smoke
+        # download, the full voice job sets this to keep the matrix
+        # green without depending on upstream availability.
+        info "Skipping pinned-model download (BUDDY_SETUP_SKIP_MODELS=1)."
     else
         info "Downloading pinned models per $MODELS_MANIFEST"
         # Task 16.3.1: hand off to the Node downloader. It streams each
@@ -171,7 +181,7 @@ if [ -f "$MODELS_MANIFEST" ]; then
         # but the hash check is skipped. Idempotent: cached files with
         # matching hash are reported and skipped.
         if ! node "$HERE/daemon/scripts/fetch-models.mjs" "$MODELS_MANIFEST" "$HERE"; then
-            err "Pinned-model download failed (see lines above). Re-run setup.sh once the network is available, or set --skip-voice for a chat-only install."
+            err "Pinned-model download failed (see lines above). Re-run setup.sh once the network is available, set BUDDY_SETUP_SKIP_MODELS=1 to opt out, or pass --skip-voice for a chat-only install."
             exit 1
         fi
     fi
