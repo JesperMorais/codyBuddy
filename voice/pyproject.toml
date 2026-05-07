@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "buddy-voice"
 version = "0.1.0"
@@ -29,3 +33,10 @@ xtts = [
   "torch>=2.0",
   "numpy>=1.26",
 ]
+
+# The voice sidecar ships two top-level modules (main.py, xtts.py) alongside
+# pure-asset directories (backchannels/, refs/). Without this, setuptools'
+# flat-layout auto-discovery aborts on the asset dirs ("Multiple top-level
+# packages discovered"). See issue #83.
+[tool.setuptools]
+py-modules = ["main", "xtts"]
