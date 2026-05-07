@@ -34,6 +34,7 @@ import { TieredRouter } from "./tiered-router.js";
 import { AudioHost, AlwaysEscalateHaiku } from "./audio-host.js";
 import { AnthropicHaikuClassifier } from "./haiku-classifier.js";
 import { WakeWordGate } from "./wake-word.js";
+import { BackchannelController } from "./backchannel.js";
 import { loadConversationalPrompts } from "./conversational-prompts.js";
 
 // Resolve __dirname for both the dev path (Node ESM running from
@@ -350,6 +351,30 @@ if (voiceLoop === "on") {
       // and every transcript passes verbatim.
       const wakeWordPhrase = process.env.BUDDY_WAKEWORD ?? "off";
       const wakeWordGate = new WakeWordGate({ phrase: wakeWordPhrase });
+
+      // Task 16.1.4: wire the BackchannelController. `BUDDY_BACKCHANNEL=off`
+      // disables the feature entirely; otherwise the controller loads
+      // voice/backchannels/*.wav and the host ticks it on a 100ms
+      // setInterval, drives notifyState from loop transitions, and
+      // notifySpeechStart/End from the VAD events. Empty clipsDir
+      // (e.g. fresh checkout that hasn't run setup) auto-disables
+      // — the controller logs and its tick() becomes a no-op.
+      const backchannelEnabled =
+        (process.env.BUDDY_BACKCHANNEL ?? "on").toLowerCase() !== "off";
+      const backchannelClipsDir = resolve(__dirname, "../../voice/backchannels");
+      const backchannel = backchannelEnabled
+        ? new BackchannelController({
+            enabled: true,
+            clipsDir: backchannelClipsDir,
+            // Production play(): hand the clip to the configured TTS
+            // backend's volume settings via a child process. For now
+            // we log the path; 16.1.7 (real audio device wiring)
+            // will replace this with a sounddevice-driven sink.
+            play: (clipPath) =>
+              console.log(`[buddy-daemon] backchannel: ${clipPath}`),
+            log: (line) => console.log(line),
+          })
+        : undefined;
       audioHost = new AudioHost({
         vad,
         stt,
@@ -357,6 +382,7 @@ if (voiceLoop === "on") {
         router,
         turnTelemetry,
         wakeWordGate,
+        backchannel,
         getSystemBlocks: () => {
           // Conversational mode prompt + personality overlay (only
           // when not "nice"). Same precedence rules as the chat path.

@@ -31,6 +31,7 @@ import type {
 import type { TurnTelemetry } from "./turn-telemetry.js";
 import type { UsageRecord } from "./telemetry.js";
 import type { WakeWordGate } from "./wake-word.js";
+import type { BackchannelController } from "./backchannel.js";
 
 /** Narrow shape of VadBridge that the host actually uses. Tests
  *  pass a tiny fake; production passes the real bridge. */
@@ -101,6 +102,20 @@ export interface AudioHostDeps {
    *  MVP behaviour) means open-mic — every final lands at
    *  loop.transcript verbatim. */
   wakeWordGate?: WakeWordGate;
+  /** Optional backchannel controller (Task 16.1.4). When provided,
+   *  the host:
+   *    - drives `notifyState` from every loop transition,
+   *    - drives `notifySpeechStart` / `notifySpeechEnd` from VAD,
+   *    - calls `tick()` on a periodic timer (default 100ms; pass
+   *      `backchannelTickMs: 0` to disable the host-driven timer
+   *      and tick externally — useful for tests).
+   *  Omitted preserves the 16.1 MVP behaviour (no backchannel). */
+  backchannel?: BackchannelController;
+  /** Tick interval in ms for the BackchannelController. Default
+   *  100ms — fast enough that the speech-duration crossing the
+   *  3s threshold is observed within one frame. 0 disables the
+   *  host-driven setInterval (tests drive `tick()` manually). */
+  backchannelTickMs?: number;
   log?: (line: string) => void;
 }
 
@@ -123,6 +138,10 @@ export class AudioHost {
   private loop: ConversationLoop;
   private bargeIn: BargeInController;
   private turnStartedAt = 0;
+  /** setInterval handle for the BackchannelController tick (16.1.4).
+   *  Held so dispose() can clear it. Undefined when the controller
+   *  isn't wired or `backchannelTickMs === 0`. */
+  private backchannelTimer?: NodeJS.Timeout;
 
   constructor(private deps: AudioHostDeps) {
     const log = deps.log ?? (() => {});
@@ -143,8 +162,15 @@ export class AudioHost {
       log,
     });
 
-    deps.vad.onSpeechStart(() => this.loop.speechStart());
-    deps.vad.onSpeechEnd(() => this.loop.speechEnd());
+    deps.vad.onSpeechStart(() => {
+      this.loop.speechStart();
+      // Task 16.1.4: drive backchannel from VAD speech-start.
+      deps.backchannel?.notifySpeechStart();
+    });
+    deps.vad.onSpeechEnd(() => {
+      this.loop.speechEnd();
+      deps.backchannel?.notifySpeechEnd();
+    });
     deps.stt.onFinal((text) => {
       // Task 16.1.3: gate STT finals through the optional wake-word
       // gate before the loop sees them. The gate handles three
@@ -162,9 +188,35 @@ export class AudioHost {
       void this.loop.transcript(forwarded);
     });
 
-    this.loop.onTransition((next, prev) =>
-      this.observeTransition(prev, next)
-    );
+    this.loop.onTransition((next, prev) => {
+      // Task 16.1.4: keep the backchannel controller in sync with
+      // the loop's state. notifyState is idempotent and cheap;
+      // forwarding every transition preserves its per-segment latch.
+      deps.backchannel?.notifyState(next);
+      this.observeTransition(prev, next);
+    });
+
+    // Task 16.1.4: periodic tick so the controller can fire when
+    // the user has been speaking >3s. Production default 100ms;
+    // tests pass 0 to disable and tick manually.
+    const tickMs = deps.backchannelTickMs ?? 100;
+    if (deps.backchannel && tickMs > 0) {
+      this.backchannelTimer = setInterval(() => {
+        deps.backchannel?.tick();
+      }, tickMs);
+      this.backchannelTimer.unref?.();
+    }
+  }
+
+  /** Tear down host-owned timers. Production has no clean shutdown
+   *  path today (daemon exits on SIGINT and Node reaps timers), but
+   *  tests need this to keep the test runner from hanging on the
+   *  setInterval reference. */
+  dispose(): void {
+    if (this.backchannelTimer) {
+      clearInterval(this.backchannelTimer);
+      this.backchannelTimer = undefined;
+    }
   }
 
   private observeTransition(
