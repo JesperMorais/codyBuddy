@@ -33,6 +33,7 @@ import { StreamingTtsBridge } from "./tts-stream.js";
 import { TieredRouter } from "./tiered-router.js";
 import { AudioHost, AlwaysEscalateHaiku } from "./audio-host.js";
 import { AnthropicHaikuClassifier } from "./haiku-classifier.js";
+import { WakeWordGate } from "./wake-word.js";
 import { loadConversationalPrompts } from "./conversational-prompts.js";
 
 // Resolve __dirname for both the dev path (Node ESM running from
@@ -342,12 +343,20 @@ if (voiceLoop === "on") {
         sonnet: client,
         log: (line) => console.log(line),
       });
+      // Task 16.1.3: wire BUDDY_WAKEWORD through a WakeWordGate so
+      // it actually gates the LLM-forwarding path (previously the
+      // env var was observed for telemetry only). `off` / unset
+      // keeps open-mic behaviour — gate.forward() short-circuits
+      // and every transcript passes verbatim.
+      const wakeWordPhrase = process.env.BUDDY_WAKEWORD ?? "off";
+      const wakeWordGate = new WakeWordGate({ phrase: wakeWordPhrase });
       audioHost = new AudioHost({
         vad,
         stt,
         tts: ttsStream,
         router,
         turnTelemetry,
+        wakeWordGate,
         getSystemBlocks: () => {
           // Conversational mode prompt + personality overlay (only
           // when not "nice"). Same precedence rules as the chat path.
@@ -364,7 +373,7 @@ if (voiceLoop === "on") {
         },
         getMode: () => session.getMode(),
         getPersonality: () => session.getPersonality(),
-        getWakeWord: () => process.env.BUDDY_WAKEWORD ?? "off",
+        getWakeWord: () => wakeWordPhrase,
         log: (line) => console.log(line),
       });
       vad.connect();

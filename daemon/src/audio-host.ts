@@ -30,6 +30,7 @@ import type {
 } from "./tiered-router.js";
 import type { TurnTelemetry } from "./turn-telemetry.js";
 import type { UsageRecord } from "./telemetry.js";
+import type { WakeWordGate } from "./wake-word.js";
 
 /** Narrow shape of VadBridge that the host actually uses. Tests
  *  pass a tiny fake; production passes the real bridge. */
@@ -90,9 +91,16 @@ export interface AudioHostDeps {
   /** Returns the active personality name. Used for telemetry. */
   getPersonality: () => string;
   /** Returns the BUDDY_WAKEWORD value at turn time. Used for
-   *  telemetry. The actual wake-word gating of transcripts is a
-   *  16.1.x deferred sub-item. */
+   *  telemetry. The actual gating of transcripts is performed by
+   *  the optional `wakeWordGate` dep below — Task 16.1.3. */
   getWakeWord: () => string;
+  /** Optional wake-word gate (Task 16.1.3). When provided, every
+   *  STT final passes through `gate.forward(text)` before reaching
+   *  the loop: gated transcripts are dropped, the wake-word phrase
+   *  itself is stripped from the forwarded text. Omitted (the 16.1
+   *  MVP behaviour) means open-mic — every final lands at
+   *  loop.transcript verbatim. */
+  wakeWordGate?: WakeWordGate;
   log?: (line: string) => void;
 }
 
@@ -138,9 +146,20 @@ export class AudioHost {
     deps.vad.onSpeechStart(() => this.loop.speechStart());
     deps.vad.onSpeechEnd(() => this.loop.speechEnd());
     deps.stt.onFinal((text) => {
+      // Task 16.1.3: gate STT finals through the optional wake-word
+      // gate before the loop sees them. The gate handles three
+      // states: "off" (every transcript passes), "gated" (drop
+      // unless the wake-word phrase is in the text — strip it on
+      // forward), "armed" (pass everything for 30s after the last
+      // hit, bumping the deadline on each follow-up). Omitting the
+      // gate dep preserves the 16.1 MVP open-mic behaviour.
+      const forwarded = deps.wakeWordGate
+        ? deps.wakeWordGate.forward(text).text
+        : text;
+      if (forwarded === null) return;
       // The conversation loop is async-safe with respect to
       // transcript() — fire-and-forget is fine.
-      void this.loop.transcript(text);
+      void this.loop.transcript(forwarded);
     });
 
     this.loop.onTransition((next, prev) =>
