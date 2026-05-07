@@ -37,7 +37,12 @@ find_python() {
     exit 1
 }
 
-python="$(find_python)"
+# `find_python`'s `exit 1` only kills the $(...) subshell; without
+# the explicit `|| exit 1` here the parent script would continue with
+# `python=""` and fail at the next line with a confusing
+# "command not found" rather than the clean stderr message
+# find_python wrote. (PR #92 review #1 — .ps1/.sh parity gap.)
+python="$(find_python)" || exit 1
 echo "Using python: $python"
 
 "$python" -m pip install --upgrade pip
