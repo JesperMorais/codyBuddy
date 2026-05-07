@@ -21,6 +21,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { pathToFileURL } from "node:url";
 
 function parseArgs(argv) {
   const out = { file: join(homedir(), ".coding-buddy", "votes.jsonl"), min: 5 };
@@ -114,8 +115,16 @@ export function report(filePath, minVotes) {
 }
 
 // Run only when invoked directly (not when imported by tests).
-const isMain = import.meta.url === `file://${process.argv[1]?.replace(/\\/g, "/")}` ||
-  import.meta.url.endsWith(process.argv[1]?.replace(/\\/g, "/") ?? "");
+//
+// Using `file://${process.argv[1]}` directly is broken on paths containing
+// a space, accent, or any percent-encoded char (#131): `import.meta.url`
+// is percent-encoded ("file:///Users/Jane%20Doe/..."), `process.argv[1]`
+// is the raw path, and the comparison silently fails. `pathToFileURL`
+// performs the same encoding `import.meta.url` uses, so it round-trips
+// cleanly on every platform (incl. Windows backslashes).
+const isMain =
+  process.argv[1] !== undefined &&
+  import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isMain) {
   const args = parseArgs(process.argv.slice(2));
   console.log(report(args.file, args.min));
