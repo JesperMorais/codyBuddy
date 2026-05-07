@@ -201,27 +201,6 @@ Fix:
 - Paste a real key from <https://console.anthropic.com/settings/keys>. Restart the daemon (`Coding Buddy: Restart daemon` or just <kbd>F5</kbd>-relaunch the extension host).
 - If you're running on Ollama (`BUDDY_PROVIDER=ollama`), the Anthropic key is irrelevant and you can leave the placeholder — but check that `BUDDY_OLLAMA_URL` points at a running endpoint.
 
-## Setup (Windows 11, PowerShell)
-
-```powershell
-# 1. Install pnpm if missing
-npm install -g pnpm
-
-# 2. Install workspace deps
-pnpm install
-
-# 3. Configure secrets
-Copy-Item .env.example .env
-# edit .env, paste your Anthropic key (skip if BUDDY_PROVIDER=ollama)
-
-# 4. (Optional) install Kokoro voice sidecar
-cd voice
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -e .
-# Download Kokoro model files into ./voice/ per https://github.com/thewh1teagle/kokoro-onnx
-```
-
 ## Run
 
 ```powershell
@@ -374,13 +353,15 @@ CI runs the same three steps on `windows-latest` for every push and PR (`.github
 ## Layout
 
 ```
-monitor-teacher/
+codyBuddy/
   package.json              # workspace root
   pnpm-workspace.yaml
   .env.example
   TASKS.md                  # ordered backlog (autonomous loop reads this)
+  setup.ps1 / setup.sh      # one-shot installer (Task 15.1)
   scripts/
     tune-triggers.mjs       # vote-log → suggested threshold deltas
+    doctor.mjs              # `pnpm doctor` health-check (Task 15.2)
   /extension
     package.json            # commands, hotkeys, sidebar view, settings
     src/
@@ -389,6 +370,9 @@ monitor-teacher/
       triggers.ts           # 6 rules + 8 anti-patterns
       redactor.ts           # glob deny + secret scrub + mini-diff
       bridge.ts             # WS client w/ ping/pong health probe
+      onboarding.ts         # first-run guidance flow
+      env-writer.ts         # safe .env mutations
+      payload.ts            # request payload assembly
       ui/sidebar.ts         # webview chat UI + 👍/👎 buttons
   /daemon
     package.json
@@ -398,23 +382,59 @@ monitor-teacher/
       session.ts            # mute, hour-budget, summary, gate, screenpipe
       anthropic.ts          # AnthropicClient + AiClient interface
       ollama.ts             # OllamaClient (OpenAI-compatible local fallback)
-      config.ts             # parseTtsBackend
+      config.ts             # env parsing (TTS backend, provider, etc.)
       memory.ts             # MemoryStore (events, summary, mute, misconceptions)
       telemetry.ts          # token-cost JSONL log
+      turn-telemetry.ts     # per-turn cost ledger (turns.jsonl)
+      cost-rate.ts          # rolling-window cost rate
+      daily-cost-cap.ts     # hard daily ceiling
       votes.ts              # 👍/👎 JSONL log
+      vote-phrase-matcher.ts# spoken thumbs-up/down phrase detection
       screenpipe.ts         # OCR fallback context provider
-      tts-bridge.ts         # piper / kokoro / none routing
-      stt.ts                # whisper.cpp wrapper
+      tts-bridge.ts         # piper / kokoro / xtts / none routing
+      tts-stream.ts         # streaming TTS adapter
+      stt.ts                # whisper.cpp wrapper (one-shot)
+      stt-stream.ts         # streaming whisper / sidecar adapter
       recorder.ts           # mic capture
+      audio-host.ts         # host-side audio playback
+      audio-devices.ts      # input/output device enumeration
+      playback.ts           # PCM playback primitive
+      vad-bridge.ts         # Silero VAD sidecar bridge
+      voice-sidecar.ts      # uvicorn lifecycle for voice/
+      wake-word.ts          # WakeWordGate (openWakeWord)
+      conversation.ts       # ConversationLoop state machine
+      conversational-prompts.ts # conversation-mode system prompts
+      barge-in.ts           # cancel registry + 100ms budget
+      backchannel.ts        # short backchannel clip scheduler
+      sentence-buffer.ts    # streaming-sentence boundary detector
+      auto-quiet.ts         # auto-mute heuristics
+      tiered-router.ts      # Haiku gate → Sonnet escalation
+      haiku-classifier.ts   # gate verdict (speak/chat/no_op)
+      payload-assembler.ts  # context blocks → API payload
+      personalities-loader.ts # load /daemon/prompts/personalities/*
+      personality-config.ts # personality→TTS routing config
+      models-manifest.ts    # voice/models.json reader/checksum
+      demo-client.ts / demo-fallback.ts # offline demo helpers
     prompts/
-      tutor.md  architect.md  explainer.md  reviewer.md
+      tutor.md architect.md explainer.md reviewer.md
+      personalities/        # tone overlays (Anthropic-safe)
+      personalities-ollama/ # Ollama-only overlays (incl. nsfw)
+      conversational/       # conversation-mode system prompts
     test/
       fixtures/             # one trigger payload per mode
       *.test.mjs            # node:test suites
   /voice
-    main.py                 # FastAPI /tts (Kokoro)
-    setup-piper.ps1
-    setup-whisper.ps1
+    buddy_voice/            # Python package (Kokoro/XTTS sidecars)
+    main.py                 # FastAPI /tts entry
+    models.json             # pinned model URLs + SHA256
+    refs/                   # XTTS reference clips per personality
+    backchannels/           # short *.wav clips for the loop
+    setup-piper.ps1 / setup-piper.sh
+    setup-whisper.ps1 / setup-whisper.sh
+    setup-xtts.ps1 / setup-xtts.sh
+  /docs
+    screenshots/            # sidebar/mic-permission stills (placeholders)
+    screencasts/            # quickstart screencast (recording brief)
 ```
 
 ## Next steps (post-MVP)
