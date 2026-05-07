@@ -1,0 +1,155 @@
+# Release workflow — Task 15.5.
+#
+# Triggered by a `v*` tag push (e.g. `v0.1.0`). Builds the VSIX
+# (once on ubuntu — the .vsix is OS-agnostic JS) plus a daemon zip
+# per OS, computes SHA256s, and attaches everything to the GitHub
+# release the tag created.
+#
+# Manual dry-run:
+#   gh workflow run release.yml --ref v0.1.0
+#
+# The matrix job zips daemon/dist/ on each OS so users running the
+# fresh-binary path (Task 15.6's single-binary daemon will replace
+# this once it lands) get an OS-suffixed asset they can pick.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  # Allow manual dispatch for debugging without a tag.
+  workflow_dispatch:
+
+jobs:
+  vsix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      vsix_path: ${{ steps.build.outputs.vsix_path }}
+      vsix_sha256: ${{ steps.checksum.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Build VSIX
+        id: build
+        run: |
+          pnpm build:vsix
+          # The vsix is named coding-buddy-X.Y.Z.vsix per the script.
+          path="$(ls extension/coding-buddy-*.vsix | head -n1)"
+          echo "vsix_path=$path" >> "$GITHUB_OUTPUT"
+      - name: Compute VSIX SHA256
+        id: checksum
+        run: |
+          sha="$(sha256sum '${{ steps.build.outputs.vsix_path }}' | awk '{print $1}')"
+          echo "sha256=$sha" >> "$GITHUB_OUTPUT"
+          echo "$sha  $(basename '${{ steps.build.outputs.vsix_path }}')" \
+            > '${{ steps.build.outputs.vsix_path }}.sha256'
+      - name: Upload VSIX artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vsix
+          path: |
+            extension/coding-buddy-*.vsix
+            extension/coding-buddy-*.vsix.sha256
+
+  daemon-zip:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            suffix: win-x64
+          - os: macos-latest
+            suffix: mac-x64
+          - os: ubuntu-latest
+            suffix: linux-x64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Build daemon
+        run: pnpm --filter buddy-daemon build
+      - name: Zip daemon dist
+        shell: bash
+        run: |
+          # daemon/dist + daemon/package.json + daemon/prompts/ are
+          # what the daemon needs at runtime. Node 20+ is still
+          # required on the user's machine until 15.6's
+          # single-binary path replaces this.
+          mkdir -p dist-zip/daemon
+          cp -r daemon/dist dist-zip/daemon/dist
+          cp daemon/package.json dist-zip/daemon/package.json
+          cp -r daemon/prompts dist-zip/daemon/prompts
+          cd dist-zip
+          # Use Node's built-in zip via tar -a on Windows, plain zip elsewhere.
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            7z a -tzip "../buddy-daemon-${{ matrix.suffix }}.zip" daemon
+          else
+            zip -r "../buddy-daemon-${{ matrix.suffix }}.zip" daemon
+          fi
+      - name: Compute daemon zip SHA256
+        shell: bash
+        run: |
+          name="buddy-daemon-${{ matrix.suffix }}.zip"
+          if command -v sha256sum >/dev/null; then
+            sha256sum "$name" | awk '{print $1}' > "$name.sha256_value"
+          else
+            shasum -a 256 "$name" | awk '{print $1}' > "$name.sha256_value"
+          fi
+          sha="$(cat "$name.sha256_value")"
+          echo "$sha  $name" > "$name.sha256"
+          rm -f "$name.sha256_value"
+      - name: Upload daemon zip artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: daemon-${{ matrix.suffix }}
+          path: |
+            buddy-daemon-${{ matrix.suffix }}.zip
+            buddy-daemon-${{ matrix.suffix }}.zip.sha256
+
+  release:
+    needs: [vsix, daemon-zip]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Stage assets
+        run: |
+          mkdir -p release-assets
+          # Flatten all subdirectories — `actions/download-artifact@v4`
+          # creates one folder per artifact name.
+          find artifacts -type f -name 'coding-buddy-*.vsix*' -exec cp {} release-assets/ \;
+          find artifacts -type f -name 'buddy-daemon-*.zip*' -exec cp {} release-assets/ \;
+          ls -la release-assets
+      - name: Attach to GitHub release
+        # workflow_dispatch runs (manual) skip this step — there's
+        # no tag-driven release to attach to.
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/*
+          fail_on_unmatched_files: true
+          generate_release_notes: true

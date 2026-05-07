@@ -2,6 +2,10 @@ node_modules/
 dist/
 out/
 *.vsix
+# Build-time copy of the repo-root LICENSE for vsce (Task 15.5).
+# Helper at extension/scripts/build-vsix.mjs writes it; canonical
+# license lives at the repo root.
+extension/LICENSE
 .env
 .env.*
 !.env.example
