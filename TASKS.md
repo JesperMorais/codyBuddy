@@ -207,11 +207,11 @@ A four-auditor + two-challenger pass found real defects across the code shipped 
 
 - [ ] **16.11** `stt-stream` dispatches an empty `(promoted, "")` final when no partial was ever received. `daemon/src/stt-stream.ts:145-159` fires the speech-end timer regardless; `(text="", source="promoted")` then lands as a no-op `final` event for downstream consumers (telemetry, conversation loop). Skip dispatch when `promoted.trim() === ""`.
 
-- [ ] **16.12** README has stale + broken sections.
+- [x] **16.12** README has stale + broken sections.
   - 7 image links and 1 video link under `docs/screenshots/**` and `docs/screencasts/**` are 404s. README discloses some as placeholders but the icons are still broken in rendered Markdown.
   - `## Setup (Windows 11, PowerShell)` (line ~204) duplicates and partially conflicts with the modern `setup.ps1` flow shipped in 15.1.
   - `## Layout` (line ~376) lists `summarizer.ts` (an 11-byte empty stub) and misses `personalities-loader`, `tts-stream`, `vad-bridge`, `wake-word`, `models-manifest`, `audio-host` (when 16.1 lands), and others.
-  Either delete the stale sections or refresh them. Test: the existing `readme-consistency.test.mjs` canary should be extended to fail on broken relative links.
+  Either delete the stale sections or refresh them. Test: the existing `readme-consistency.test.mjs` canary should be extended to fail on broken relative links. (see #136)
 
 - [ ] **16.13** `WakeWordGate.findPhrase` is substring, not whole-word. `daemon/src/wake-word.ts:147-150` uses `String.indexOf` on lowercased haystack. Wake word `"buddy"` triggers on `"buddybuilds"`, `"my buddyship is great"`. Header at line 142 calls this "whole-word match" but the implementation isn't. Use `\b<phrase>\b` regex or a manual word-boundary check. Test: the existing 11.k case for `"buddy"` and a new case `"buddybuilds"` must NOT trigger.
 
