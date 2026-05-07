@@ -35,6 +35,7 @@ import { AudioHost, AlwaysEscalateHaiku } from "./audio-host.js";
 import { AnthropicHaikuClassifier } from "./haiku-classifier.js";
 import { WakeWordGate } from "./wake-word.js";
 import { BackchannelController } from "./backchannel.js";
+import { AutoQuietGate } from "./auto-quiet.js";
 import { loadConversationalPrompts } from "./conversational-prompts.js";
 
 // Resolve __dirname for both the dev path (Node ESM running from
@@ -375,6 +376,20 @@ if (voiceLoop === "on") {
             log: (line) => console.log(line),
           })
         : undefined;
+
+      // Task 16.1.5: wire the AutoQuietGate. After 5min of no
+      // activity the gate flips to QUIET and starts dropping short
+      // transcripts (< 24 chars by default) so a forgotten-open mic
+      // in another room doesn't bleed into the LLM. VAD speech-start
+      // / speech-end fires noteActivity() so a returning user
+      // resumes ACTIVE immediately. Sharing BUDDY_WAKEWORD with the
+      // gate means the user's wake-word doubles as a "wake up" cue
+      // when QUIET, even past the 5min window.
+      const autoQuietWakeWord =
+        wakeWordPhrase !== "off" ? wakeWordPhrase : undefined;
+      const autoQuiet = new AutoQuietGate({
+        wakeWord: autoQuietWakeWord,
+      });
       audioHost = new AudioHost({
         vad,
         stt,
@@ -383,6 +398,7 @@ if (voiceLoop === "on") {
         turnTelemetry,
         wakeWordGate,
         backchannel,
+        autoQuiet,
         getSystemBlocks: () => {
           // Conversational mode prompt + personality overlay (only
           // when not "nice"). Same precedence rules as the chat path.
