@@ -28,6 +28,7 @@ type TranscribedHandler = (info: { ok: boolean; text?: string; error?: string; r
 type RecordStartedHandler = (info: { ok: boolean; error?: string }) => void;
 type HealthHandler = (info: { up: boolean }) => void;
 type DemoModeHandler = (info: { active: boolean }) => void;
+type LoopStateHandler = (info: { state: string }) => void;
 
 export interface AudioDevice {
   id: string;
@@ -61,6 +62,7 @@ export class DaemonBridge {
   private recordStartedHandler?: RecordStartedHandler;
   private healthHandler?: HealthHandler;
   private demoModeHandler?: DemoModeHandler;
+  private loopStateHandler?: LoopStateHandler;
   private audioDeviceWaiters = new Map<string, AudioDevicesResolver>();
   private healthUp = false;
   private disposed = false;
@@ -112,6 +114,13 @@ export class DaemonBridge {
   /** Subscribe to demo-mode toggles from the daemon (Task 15.4). */
   onDemoMode(h: DemoModeHandler): void {
     this.demoModeHandler = h;
+  }
+
+  /** Subscribe to conversation-loop state updates (Task 16.1.8).
+   *  Daemon broadcasts `{type:"loopState", state:"..."}` on every
+   *  voice-loop transition; the sidebar pill mirrors the value. */
+  onLoopState(h: LoopStateHandler): void {
+    this.loopStateHandler = h;
   }
 
   /** Ask the daemon for its audio device list (Task 15.8).
@@ -279,6 +288,9 @@ export class DaemonBridge {
           // Task 15.4: daemon tells the sidebar whether to render
           // the demo-mode watermark.
           this.demoModeHandler({ active: !!msg.active });
+        } else if (msg.type === "loopState" && this.loopStateHandler) {
+          // Task 16.1.8: voice-loop state update from the daemon.
+          this.loopStateHandler({ state: String(msg.state ?? "idle") });
         } else if (msg.type === "audioDevices") {
           // Task 15.8: response to a getAudioDevices request.
           const requestId = String(msg.requestId ?? "");
