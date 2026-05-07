@@ -233,3 +233,80 @@ test("10.5 (f) trigger() with no cancellers resolves to 0 immediately", async ()
   assert.equal(elapsed, 0);
   assert.ok(Date.now() - t0 < 5, "no work should take measurable time");
 });
+
+// Task 16.10: per-canceller timeout. Without it, a single hung canceller
+// (e.g. TTS dispose stuck on a slow WS close) wedges inFlight=true
+// forever, dropping all subsequent speech.start events.
+
+test("16.10 (a) a hung canceller is abandoned after the per-canceller timeout", async () => {
+  const logs = [];
+  const barge = new BargeInController({
+    log: (l) => logs.push(l),
+    cancellerTimeoutMs: 50,
+  });
+  let fastRan = false;
+  // Hung canceller: returns a Promise that never resolves.
+  barge.register("stuck-tts", () => new Promise(() => {}));
+  // Fast canceller alongside it should still get its work done.
+  barge.register("fast-llm", () => {
+    fastRan = true;
+  });
+
+  const t0 = Date.now();
+  const elapsed = await barge.trigger();
+  const wall = Date.now() - t0;
+
+  assert.equal(fastRan, true, "non-stuck canceller must still run");
+  // Elapsed should reflect the timeout (~50ms), not "forever".
+  assert.ok(
+    elapsed >= 45 && elapsed < 200,
+    `trigger should resolve near the timeout; got ${elapsed}ms`
+  );
+  assert.ok(wall < 200, `wall time should be bounded by timeout; got ${wall}ms`);
+  assert.ok(
+    logs.some((l) => /canceller stuck-tts timed out after 50ms/.test(l)),
+    `stuck canceller name+timeout should appear in logs; got: ${JSON.stringify(logs)}`
+  );
+  // Crucial: the controller must clear inFlight so the next
+  // speech.start isn't dropped.
+  assert.equal(barge.isInFlight(), false, "inFlight must clear after timeout");
+});
+
+test("16.10 (b) subsequent trigger() works after a previous trigger timed out", async () => {
+  const barge = new BargeInController({
+    log: () => {},
+    cancellerTimeoutMs: 30,
+  });
+  // First trigger: only a hung canceller. After timeout, inFlight clears.
+  const unstuck = barge.register("hang", () => new Promise(() => {}));
+  await barge.trigger();
+  assert.equal(barge.isInFlight(), false);
+
+  // Replace the hung canceller with a fast one. The next speech.start
+  // event must fire it (pre-fix, this would be a no-op because
+  // inFlight stayed true forever).
+  unstuck();
+  let ran = 0;
+  barge.register("fresh", () => {
+    ran += 1;
+  });
+  await barge.trigger();
+  assert.equal(ran, 1, "follow-up trigger after a timeout must still fire cancellers");
+});
+
+test("16.10 (c) default per-canceller timeout is 100ms (spec budget)", async () => {
+  const logs = [];
+  const barge = new BargeInController({ log: (l) => logs.push(l) });
+  // No explicit timeout — should pick up the spec default.
+  barge.register("hang", () => new Promise(() => {}));
+  const elapsed = await barge.trigger();
+  // Default budget is 100ms; we allow some slack for the event loop.
+  assert.ok(
+    elapsed >= 90 && elapsed < 250,
+    `default budget should be ~100ms; got ${elapsed}ms`
+  );
+  assert.ok(
+    logs.some((l) => /timed out after 100ms/.test(l)),
+    `default timeout should be reflected in the log message; got: ${JSON.stringify(logs)}`
+  );
+});
