@@ -44,6 +44,7 @@ import {
   persistCapState,
 } from "./daily-cost-cap.js";
 import { homedir } from "node:os";
+import { SubprocessPlaybackSink, wirePlayback } from "./playback.js";
 
 // Resolve __dirname for both the dev path (Node ESM running from
 // daemon/dist/index.js) and the SEA bundle (Task 15.6) where
@@ -362,6 +363,23 @@ if (voiceLoop === "on") {
         url: `ws://127.0.0.1:${voicePort}/tts/stream`,
         log: (line) => console.log(line),
       });
+      // Task 16.1.7: real audio device wiring on the daemon side.
+      // The user picks an output device via the
+      // `coding-buddy.selectAudioDevices` command which writes
+      // BUDDY_AUDIO_OUTPUT_ID to .env. We spawn a fresh paplay/ffplay
+      // per utterance and pipe PCM frames into its stdin, so the user
+      // actually hears the TTS replies. `BUDDY_PLAYBACK=off` opts out
+      // (silent install — useful for chat-only or CI runs); missing
+      // CLI tools degrade to a logged no-op (the daemon stays up).
+      const playbackEnabled =
+        (process.env.BUDDY_PLAYBACK ?? "on").toLowerCase() !== "off";
+      const playback = playbackEnabled
+        ? new SubprocessPlaybackSink({
+            outputDeviceId: process.env.BUDDY_AUDIO_OUTPUT_ID,
+            log: (line) => console.log(line),
+          })
+        : undefined;
+      if (playback) wirePlayback(ttsStream, playback);
       // Task 16.1.1: real Haiku classifier on the Anthropic path so
       // cheap-tier turns actually save tokens. Ollama users keep the
       // always-escalate stub — Haiku is Anthropic-only and local
