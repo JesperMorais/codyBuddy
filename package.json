@@ -6,7 +6,7 @@
   "scripts": {
     "build": "pnpm -r build",
     "dev:daemon": "pnpm --filter buddy-daemon dev",
-    "dev:voice": "cd voice && uvicorn main:app --port 31416 --reload",
+    "dev:voice": "cd voice && uvicorn buddy_voice.main:app --port 31416 --reload",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
     "changelog": "node scripts/gen-changelog.mjs",

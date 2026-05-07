@@ -54,7 +54,7 @@ Done.
 
 Run the sidecar with:
   cd voice
-  uvicorn xtts:app --port 31417
+  uvicorn buddy_voice.xtts:app --port 31417
 
 Health check (separate terminal):
   curl http://127.0.0.1:31417/health

@@ -1,6 +1,6 @@
 """Kokoro TTS sidecar (and now silero-vad too).
 
-Run: uvicorn main:app --port 31416
+Run: uvicorn buddy_voice.main:app --port 31416
 
 Plays audio on the host's default output device. Lazy-loads Kokoro on first
 request so cold-start cost is paid once. If kokoro-onnx isn't installed, the

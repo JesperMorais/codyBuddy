@@ -34,9 +34,11 @@ xtts = [
   "numpy>=1.26",
 ]
 
-# The voice sidecar ships two top-level modules (main.py, xtts.py) alongside
-# pure-asset directories (backchannels/, refs/). Without this, setuptools'
-# flat-layout auto-discovery aborts on the asset dirs ("Multiple top-level
-# packages discovered"). See issue #83.
+# The voice sidecar's Python code lives in the `buddy_voice` package
+# (matching the dist name). Asset dirs (backchannels/, refs/) sit
+# alongside the package as plain runtime data — accessed by cwd-
+# relative paths from the spawned uvicorn process, not via package
+# resources. Issue #99 tracks declaring package-data once non-editable
+# installs are supported.
 [tool.setuptools]
-py-modules = ["main", "xtts"]
+packages = ["buddy_voice"]

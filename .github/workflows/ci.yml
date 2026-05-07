@@ -124,10 +124,11 @@ jobs:
         run: bash setup.sh
       - name: Verify voice editable install
         # If voice/pyproject.toml regresses (#83-style), or main.py /
-        # xtts.py get renamed without updating py-modules, this import
-        # check fails fast with a clear signal.
+        # xtts.py get renamed without updating the [tool.setuptools]
+        # packages declaration, this import check fails fast with a
+        # clear signal.
         shell: bash
-        run: voice/.venv/bin/python -c "import main, xtts; print('voice ok:', main.__file__)"
+        run: voice/.venv/bin/python -c "import buddy_voice.main, buddy_voice.xtts; print('voice ok:', buddy_voice.main.__file__)"
       - name: Verify .env was created
         shell: bash
         run: test -f .env
