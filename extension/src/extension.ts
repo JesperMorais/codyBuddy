@@ -1,7 +1,8 @@
 import * as vscode from "vscode";
 import { DaemonBridge } from "./bridge";
 import { TriggerEngine, TriggerEvent } from "./triggers";
-import { isDeniedFile, scrubSecrets, makeMiniDiff } from "./redactor";
+import { isDeniedFile, scrubSecrets } from "./redactor";
+import { buildTriggerPayload } from "./payload";
 import { BuddySidebarProvider } from "./ui/sidebar";
 import { findDaemonScript, probeDaemonPort, spawnDaemon, SpawnedDaemon } from "./daemon-spawn";
 import {
@@ -727,8 +728,22 @@ function sendTrigger(
 ): void {
   const editor = vscode.window.activeTextEditor;
   const target = doc ?? editor?.document;
-  const payload: Record<string, unknown> = {
-    active_file: target ? vscode.workspace.asRelativePath(target.uri) : null,
+
+  // Snapshot bookkeeping is a side effect that must happen even on
+  // denied files so that the next non-denied turn diffs against the
+  // current text rather than the pre-mute snapshot.
+  let prevFileText = "";
+  let fileText = "";
+  if (target) {
+    const key = target.uri.toString();
+    fileText = target.getText();
+    prevFileText = fileSnapshots.get(key) ?? fileText;
+    fileSnapshots.set(key, fileText);
+  }
+
+  const payload = buildTriggerPayload({
+    activeFileRel: target ? vscode.workspace.asRelativePath(target.uri) : null,
+    activeFileFs: target ? target.uri.fsPath : null,
     selection: editor
       ? {
           line: editor.selection.active.line,
@@ -742,35 +757,22 @@ function sendTrigger(
         message: d.message,
         line: d.range.start.line,
       })),
-    recent_terminal: engine.recentTerminal(),
-    user_question: ev.userQuestion ?? null,
+    fileKey: target ? target.uri.toString() : null,
+    fileText,
+    prevFileText,
+    cursorLine: editor?.selection.active.line ?? 0,
+    maxDiffLines,
+    recentTerminal: engine.recentTerminal(),
+    userQuestion: ev.userQuestion ?? null,
     reason: ev.reason,
-  };
-
-  if (target) {
-    const key = target.uri.toString();
-    const next = target.getText();
-    const prev = fileSnapshots.get(key) ?? next;
-    payload.recent_diff = makeMiniDiff(prev, next, maxDiffLines);
-    fileSnapshots.set(key, next);
-
-    const lines = next.split("\n");
-    if (lines.length <= 300 && next.length <= 12_000) {
-      payload.file_content = next;
-    } else {
-      const cursor = editor?.selection.active.line ?? 0;
-      const start = Math.max(0, cursor - 40);
-      const end = Math.min(lines.length, cursor + 40);
-      payload.file_excerpt = {
-        start_line: start,
-        end_line: end,
-        text: lines.slice(start, end).join("\n"),
-      };
-    }
-  }
+  });
 
   const scrubbed = scrubSecrets(JSON.stringify(payload));
   if (scrubbed.hits > 0) {
+    // Preserve the existing scrub-warning behaviour. `buildTriggerPayload`
+    // may have already populated `secret_warning` for deny-list drops;
+    // either message is informative on its own, but the post-scrub one
+    // wins because regex-shaped secrets are the more dangerous case.
     payload.secret_warning = `Scrubbed ${scrubbed.hits} secret-shaped strings before sending.`;
   }
   const safePayload = JSON.parse(scrubbed.text);

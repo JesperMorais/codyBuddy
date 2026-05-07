@@ -72,3 +72,40 @@ test("8.1 (e) README points to scripts/tune-triggers.mjs and that file exists", 
   assert.match(readme, /scripts\/tune-triggers\.mjs/);
   assert.ok(existsSync(resolve(repoRoot, "scripts", "tune-triggers.mjs")));
 });
+
+// Task 16.12: every relative link / image in the README must resolve to a
+// real file in the repo. Absolute (http://, https://, mailto:) links and
+// in-page anchors (#section) are skipped — the test only owns local paths.
+//
+// Manual-deliverable allowlist: paths that the README intentionally
+// references before the binary lands (recording brief documents the
+// recipe; landing the binary is a separate one-file PR).
+const MANUAL_DELIVERABLES = new Set([
+  "docs/screencasts/quickstart.mp4",
+]);
+
+test("16.12 every relative link and image in the README points at a real file", () => {
+  // Markdown link/image targets: matches `](target)` for both `[text](…)`
+  // and `![alt](…)`. We ignore anything starting with a scheme or `#`.
+  const linkRe = /!?\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
+
+  const broken = [];
+  for (const m of readme.matchAll(linkRe)) {
+    const raw = m[1];
+    // Strip in-target fragment anchors: `path/to/file.md#section`.
+    const target = raw.split("#")[0];
+    if (target === "") continue; // pure anchor like `(#configuration-env)`
+    if (/^[a-z][a-z0-9+.-]*:/i.test(target)) continue; // http:, https:, mailto:, etc.
+    if (target.startsWith("//")) continue; // protocol-relative
+    if (MANUAL_DELIVERABLES.has(target)) continue;
+
+    const abs = resolve(repoRoot, target);
+    if (!existsSync(abs)) broken.push(target);
+  }
+
+  assert.deepEqual(
+    broken,
+    [],
+    `README references missing relative paths: ${broken.join(", ")}`
+  );
+});

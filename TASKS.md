@@ -187,7 +187,7 @@ A four-auditor + two-challenger pass found real defects across the code shipped 
 
 ### High
 
-- [ ] **16.4** `sendTrigger` doesn't deny-check the active file on user-initiated paths. The watcher paths (anti-pattern, stuck-loop) at `extension/src/extension.ts:601,627,647,657` correctly gate on `isDeniedFile(activeFile)`. But `sendTrigger` itself (`extension.ts:700-758`) is invoked unguarded from sidebar input (line 343), voice push-to-talk transcribed (line 396), and `Ctrl+Alt+Q` (line 411). If the user opens `.env` and asks "what's wrong here?", the unredacted `file_content` (300 lines / 12KB cap) reaches the LLM. `scrubSecrets` only catches shaped tokens (`sk-…`, `AKIA…`, `ghp_…`, `xox[abp]-…`); generic `PASSWORD=…`, `DB_URL=postgres://user:pw@…`, JWTs, OAuth refresh tokens, multi-line PEM private keys all survive. Add `if (target && isDeniedFile(target.uri.fsPath)) { drop file_content + active_file }` at the top of the `if (target)` block. Test: dispatch `coding-buddy.ask` with `.env` active; assert payload omits `file_content` and `active_file`.
+- [x] **16.4** `sendTrigger` doesn't deny-check the active file on user-initiated paths. The watcher paths (anti-pattern, stuck-loop) at `extension/src/extension.ts:601,627,647,657` correctly gate on `isDeniedFile(activeFile)`. But `sendTrigger` itself (`extension.ts:700-758`) is invoked unguarded from sidebar input (line 343), voice push-to-talk transcribed (line 396), and `Ctrl+Alt+Q` (line 411). If the user opens `.env` and asks "what's wrong here?", the unredacted `file_content` (300 lines / 12KB cap) reaches the LLM. `scrubSecrets` only catches shaped tokens (`sk-…`, `AKIA…`, `ghp_…`, `xox[abp]-…`); generic `PASSWORD=…`, `DB_URL=postgres://user:pw@…`, JWTs, OAuth refresh tokens, multi-line PEM private keys all survive. Add `if (target && isDeniedFile(target.uri.fsPath)) { drop file_content + active_file }` at the top of the `if (target)` block. Test: dispatch `coding-buddy.ask` with `.env` active; assert payload omits `file_content` and `active_file`. (see #127)
 
 - [ ] **16.5** Daemon stdout logs raw STT transcripts. `daemon/src/server.ts:243` and `:265` do `console.log(\`[transcribe] → "${text}"\`)`. Transcripts are never scrubbed at the daemon level (the daemon-side redactor in `daemon/src/redactor.ts` is dead code today — its only consumer, `payload-assembler.ts`, is unwired per 16.1). If the user dictates a secret aloud or reads one from screen, it lands in `journalctl` / log files unredacted. Replace the log lines with `byte-count + first-K-chars-redacted` or pass through `scrubSecrets` first.
 
@@ -207,11 +207,11 @@ A four-auditor + two-challenger pass found real defects across the code shipped 
 
 - [ ] **16.11** `stt-stream` dispatches an empty `(promoted, "")` final when no partial was ever received. `daemon/src/stt-stream.ts:145-159` fires the speech-end timer regardless; `(text="", source="promoted")` then lands as a no-op `final` event for downstream consumers (telemetry, conversation loop). Skip dispatch when `promoted.trim() === ""`.
 
-- [ ] **16.12** README has stale + broken sections.
+- [x] **16.12** README has stale + broken sections.
   - 7 image links and 1 video link under `docs/screenshots/**` and `docs/screencasts/**` are 404s. README discloses some as placeholders but the icons are still broken in rendered Markdown.
   - `## Setup (Windows 11, PowerShell)` (line ~204) duplicates and partially conflicts with the modern `setup.ps1` flow shipped in 15.1.
   - `## Layout` (line ~376) lists `summarizer.ts` (an 11-byte empty stub) and misses `personalities-loader`, `tts-stream`, `vad-bridge`, `wake-word`, `models-manifest`, `audio-host` (when 16.1 lands), and others.
-  Either delete the stale sections or refresh them. Test: the existing `readme-consistency.test.mjs` canary should be extended to fail on broken relative links.
+  Either delete the stale sections or refresh them. Test: the existing `readme-consistency.test.mjs` canary should be extended to fail on broken relative links. (see #136)
 
 - [ ] **16.13** `WakeWordGate.findPhrase` is substring, not whole-word. `daemon/src/wake-word.ts:147-150` uses `String.indexOf` on lowercased haystack. Wake word `"buddy"` triggers on `"buddybuilds"`, `"my buddyship is great"`. Header at line 142 calls this "whole-word match" but the implementation isn't. Use `\b<phrase>\b` regex or a manual word-boundary check. Test: the existing 11.k case for `"buddy"` and a new case `"buddybuilds"` must NOT trigger.
 

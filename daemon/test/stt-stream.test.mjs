@@ -134,7 +134,11 @@ test("10.2 (c) signalSpeechEnd promotes the last partial within 400ms when the e
   }
 });
 
-test("10.2 (d) signalSpeechEnd promotes empty string when no partial was ever received", async () => {
+test("10.2 (d) [16.11] signalSpeechEnd skips dispatch when no partial was ever received", async () => {
+  // Task 16.11: an empty promoted final used to land as a no-op
+  // `(text="", source="promoted")` event for downstream consumers
+  // (telemetry, conversation loop). The bridge now suppresses the
+  // dispatch entirely when lastPartial.trim() === "".
   const bridge = buildBridge(
     { FAKE_PARTIAL_AT_BYTES: "1024", FAKE_FINAL_ON_IDLE_MS: "0" },
     { speechEndTimeoutMs: 100 }
@@ -146,9 +150,7 @@ test("10.2 (d) signalSpeechEnd promotes empty string when no partial was ever re
     // No audio sent — no partials.
     bridge.signalSpeechEnd();
     await wait(200);
-    assert.equal(finals.length, 1);
-    assert.equal(finals[0].source, "promoted");
-    assert.equal(finals[0].text, "");
+    assert.equal(finals.length, 0, "must not dispatch an empty promoted final");
   } finally {
     bridge.stop();
   }
