@@ -93,3 +93,41 @@ jobs:
         run: |
           pnpm build:daemon-bin
           cd daemon && node --test test/daemon-bin-smoke.test.mjs
+
+  setup-script-voice:
+    # #85: the cross-OS `setup-script` matrix above runs with
+    # --skip-voice on every cell to keep the matrix fast, which means
+    # the voice install path (`pip install -e voice` + kokoro-onnx /
+    # sounddevice / numpy) gets zero CI coverage. That's how #83
+    # (the flat-layout package-discovery bug) shipped to release.
+    #
+    # This job pays the install cost on a single ubuntu-latest cell
+    # — Linux pip wheels are the fastest of the three platforms —
+    # so a regression in voice/pyproject.toml or the base-deps tree
+    # is caught before users hit it.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run setup.sh (full — voice enabled)
+        shell: bash
+        run: bash setup.sh
+      - name: Verify voice editable install
+        # If voice/pyproject.toml regresses (#83-style), or main.py /
+        # xtts.py get renamed without updating py-modules, this import
+        # check fails fast with a clear signal.
+        shell: bash
+        run: voice/.venv/bin/python -c "import main, xtts; print('voice ok:', main.__file__)"
+      - name: Verify .env was created
+        shell: bash
+        run: test -f .env
