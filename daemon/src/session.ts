@@ -22,6 +22,19 @@ export class Session {
   private memory: MemoryStore;
   private screenpipe?: ScreenpipeClient;
   private personalities: Map<string, string>;
+  /** The user's configured personality — what the sidebar dropdown
+   *  reflects and what's persisted across daemon restarts. Only changes
+   *  via `setPersonality` (or constructor). The shuffle path leaves
+   *  this untouched even though it rolls a different runtime overlay
+   *  per turn (see `personality`). */
+  private seedPersonality: string;
+  /** The personality used to build the next turn's system blocks. In
+   *  steady state this equals `seedPersonality`; under shuffle each
+   *  trigger picks a transient overlay and writes it here so
+   *  `buildSystemBlocks()` and turn telemetry see the rolled value.
+   *  16.16: kept distinct from `seedPersonality` so the sidebar (via
+   *  `getSeedPersonality()` → `modeAck`) doesn't visibly hop on every
+   *  trigger. */
   private personality: string;
   private shuffle: boolean;
   private rng: () => number;
@@ -64,6 +77,10 @@ export class Session {
     } else {
       this.personality = "nice";
     }
+    // The seed mirrors the resolved personality at boot. From here on,
+    // only setPersonality() updates the seed; shuffle's per-trigger
+    // rotation only writes to `personality`.
+    this.seedPersonality = this.personality;
     // Shuffle precedence mirrors personality: persisted value beats the
     // env-driven default. Off by default so the daemon stays
     // deterministic for users who never opted in.
@@ -108,6 +125,15 @@ export class Session {
     return this.personality;
   }
 
+  /** The user's configured personality — what the sidebar dropdown
+   *  should display. Identical to `getPersonality()` except under
+   *  shuffle mode, where each trigger rolls a transient overlay
+   *  exposed via `getPersonality()` while the seed surfaced here
+   *  stays stable. 16.16. */
+  getSeedPersonality(): string {
+    return this.seedPersonality;
+  }
+
   /** Returns true on success. "nice" is always accepted (the neutral
    *  baseline that omits any overlay). Any other name must exist in the
    *  loaded personalities map. The choice is persisted on success so a
@@ -115,11 +141,13 @@ export class Session {
   setPersonality(name: string): boolean {
     if (name === "nice") {
       this.personality = "nice";
+      this.seedPersonality = "nice";
       this.memory.setPersonality("nice");
       return true;
     }
     if (!this.personalities.has(name)) return false;
     this.personality = name;
+    this.seedPersonality = name;
     this.memory.setPersonality(name);
     return true;
   }

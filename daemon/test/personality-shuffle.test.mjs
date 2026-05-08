@@ -213,6 +213,120 @@ test("9.6 (g) persisted shuffle=false beats defaultShuffle=true on restore", () 
   }
 });
 
+// 16.16: shuffle's per-trigger roll must not visibly mutate the
+// configured "seed" personality — the sidebar dropdown reads the seed
+// (via the modeAck broadcast → server.ts uses getSeedPersonality()),
+// while the runtime overlay used by the system-block builder rolls
+// per turn. These tests pin the split so a future regression that
+// collapses them back into one field fails loudly.
+
+test("16.16 (a) seed personality stays put across shuffle rotations", async () => {
+  const { dir, cleanup } = freshTempDir();
+  try {
+    const { session } = buildSession({
+      dir,
+      defaultShuffle: true,
+      defaultPersonality: "dry",
+      rng: seededRng(123),
+    });
+    assert.equal(session.getSeedPersonality(), "dry");
+    for (let i = 0; i < 5; i++) {
+      await session.handleTrigger("EXPLICIT_ASK", { active_file: `f${i}.ts` });
+      assert.equal(
+        session.getSeedPersonality(),
+        "dry",
+        `iteration ${i}: seed must remain "dry" even though runtime overlay rolled to ${session.getPersonality()}`
+      );
+    }
+  } finally {
+    cleanup();
+  }
+});
+
+test("16.16 (b) setPersonality updates both the seed and runtime overlay", async () => {
+  const { dir, cleanup } = freshTempDir();
+  try {
+    const { session } = buildSession({
+      dir,
+      defaultShuffle: true,
+      defaultPersonality: "nice",
+      rng: seededRng(7),
+    });
+    // Run a turn so the runtime overlay rolls away from the seed.
+    await session.handleTrigger("EXPLICIT_ASK", { active_file: "a.ts" });
+    assert.equal(session.getSeedPersonality(), "nice");
+
+    const ok = session.setPersonality("pirate");
+    assert.equal(ok, true);
+    assert.equal(session.getSeedPersonality(), "pirate");
+    assert.equal(session.getPersonality(), "pirate");
+  } finally {
+    cleanup();
+  }
+});
+
+test("16.16 (c) seed personality persists across daemon restart, runtime overlay does not", async () => {
+  const { dir, cleanup } = freshTempDir();
+  try {
+    const { session: session1 } = buildSession({
+      dir,
+      defaultShuffle: true,
+      defaultPersonality: "nice",
+      rng: seededRng(11),
+    });
+    // The user picks "rude" via the sidebar — that goes through
+    // setPersonality, which both persists and updates the seed.
+    assert.equal(session1.setPersonality("rude"), true);
+    assert.equal(session1.getSeedPersonality(), "rude");
+
+    // Run a turn so shuffle rolls the runtime overlay away from the seed.
+    await session1.handleTrigger("EXPLICIT_ASK", { active_file: "a.ts" });
+    assert.notEqual(
+      session1.getPersonality(),
+      "rude",
+      "shuffle must have rolled the runtime overlay"
+    );
+
+    // Simulate a daemon restart with a fresh MemoryStore on the same dir.
+    const memory2 = new MemoryStore(dir);
+    const session2 = new Session(new FakeAnthropicClient(), prompts, {
+      memory: memory2,
+      personalities,
+      defaultShuffle: true,
+    });
+    assert.equal(
+      session2.getSeedPersonality(),
+      "rude",
+      "the user's configured personality must survive a daemon restart"
+    );
+    assert.equal(
+      session2.getPersonality(),
+      "rude",
+      "boot restores the rolled overlay to the seed; shuffle re-rolls on the next trigger"
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test("16.16 (d) shuffle off: seed and runtime overlay stay in lockstep", async () => {
+  const { dir, cleanup } = freshTempDir();
+  try {
+    const { session } = buildSession({
+      dir,
+      defaultPersonality: "dry",
+      // defaultShuffle omitted → false
+    });
+    assert.equal(session.getSeedPersonality(), "dry");
+    assert.equal(session.getPersonality(), "dry");
+    await session.handleTrigger("EXPLICIT_ASK", { active_file: "a.ts" });
+    assert.equal(session.getSeedPersonality(), "dry");
+    assert.equal(session.getPersonality(), "dry");
+  } finally {
+    cleanup();
+  }
+});
+
 test("9.6 (h) shuffle picks include 'nice' (overlay omission still valid mid-rotation)", async () => {
   const { dir, cleanup } = freshTempDir();
   try {
