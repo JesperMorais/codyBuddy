@@ -26,6 +26,8 @@
 // completeUtterance dependency. This module is decoupled from the
 // loop so the routing logic can be exercised on its own.
 
+import { createHash } from "node:crypto";
+
 import type { BuddyReply } from "./anthropic.js";
 import type { UsageRecord } from "./telemetry.js";
 
@@ -208,6 +210,28 @@ export class TieredRouter {
   }
 }
 
+/** Diffs longer than this are summarized by length+SHA-256 instead of
+ *  embedding their full text in the fingerprint string. Keeps the
+ *  fingerprint bounded (~80 bytes) on long edits while preserving the
+ *  "any change flips the hash" semantics: a single-byte tweak inside
+ *  a 50KB diff still flips the digest. Threshold chosen so typical
+ *  voice-turn payloads (a few lines of context) keep the cheap path
+ *  with no hashing — only outliers pay the cost.
+ *
+ *  Task 16.19 — bound fingerprint memory for long diffs. */
+const DIFF_HASH_THRESHOLD_BYTES = 4 * 1024;
+
+function summarizeDiff(diff: string): string {
+  // Byte length, not character length, since the threshold is meant
+  // as a memory bound on the fingerprint string itself.
+  if (Buffer.byteLength(diff, "utf8") <= DIFF_HASH_THRESHOLD_BYTES) {
+    return diff;
+  }
+  // The "sha256:" prefix keeps short diffs that happen to look like a
+  // 64-char hex string from colliding with the hashed branch.
+  return `sha256:${createHash("sha256").update(diff).digest("hex")}`;
+}
+
 /** Stable signature of the editor-context-bearing fields. Anything
  *  observably different between two turns flips the fingerprint and
  *  triggers escalation (b). */
@@ -215,7 +239,7 @@ function editorFingerprint(p: RouterPayload): string {
   const file = p.active_file ?? "";
   const diff = p.recent_diff ?? "";
   const diags = (p.diagnostics ?? []).map((d) => d.message ?? "").join("|");
-  return `${file}::${diff.length}::${diff}::${diags}`;
+  return `${file}::${diff.length}::${summarizeDiff(diff)}::${diags}`;
 }
 
 function defaultEstimate(text: string): number {
