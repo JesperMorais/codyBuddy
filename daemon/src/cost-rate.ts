@@ -25,6 +25,16 @@ export interface RollingCostRateOptions {
   windowMs?: number;
   /** Clock seam for tests. */
   now?: () => number;
+  /** Bound on the bytes read from `turns.jsonl` per snapshot — see
+   *  TurnTelemetry.readTail. Default 256 KiB, which is ~10× the
+   *  expected per-window entry volume (a few hundred bytes per turn
+   *  × dozens of turns per default 10-min window). Bumping this is
+   *  cheap; raising it past a few MB defeats the purpose. Tests use
+   *  a small value to exercise the boundary. Set to 0 to fall back
+   *  to a full read (legacy behaviour).
+   *
+   *  Task 16.19 — bound RollingCostRate read cost. */
+  readTailBytes?: number;
 }
 
 export interface CostRateSnapshot {
@@ -46,11 +56,13 @@ export class RollingCostRate {
   private telemetry: TurnTelemetry;
   private windowMs: number;
   private nowFn: () => number;
+  private readTailBytes: number;
 
   constructor(opts: RollingCostRateOptions) {
     this.telemetry = opts.turnTelemetry;
     this.windowMs = opts.windowMs ?? 10 * 60_000;
     this.nowFn = opts.now ?? Date.now;
+    this.readTailBytes = opts.readTailBytes ?? 256 * 1024;
   }
 
   /** Window size for sidebar / config display. */
@@ -70,7 +82,18 @@ export class RollingCostRate {
     let count = 0;
     let entries: TurnEntry[];
     try {
-      entries = this.telemetry.read();
+      // Task 16.19: bound the per-poll read so a long-running daemon
+      // doesn't re-parse a multi-MB turns.jsonl on every snapshot.
+      // readTailBytes=0 explicitly falls back to a full read; we also
+      // fall back when the injected telemetry lacks readTail (test
+      // doubles predating Task 16.19).
+      const canTail =
+        this.readTailBytes > 0 &&
+        typeof (this.telemetry as { readTail?: unknown }).readTail ===
+          "function";
+      entries = canTail
+        ? this.telemetry.readTail(this.readTailBytes)
+        : this.telemetry.read();
     } catch (err) {
       console.error("[cost-rate] telemetry read failed:", err);
       entries = [];

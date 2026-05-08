@@ -358,6 +358,109 @@ test("#141 read() of an entirely corrupt file returns [] without throwing", () =
   assert.deepEqual(tel.read(), []);
 });
 
+test("16.19 readTail returns empty for missing file and zero maxBytes", () => {
+  const path = tempPath();
+  const tel = new TurnTelemetry(path);
+  // No file yet.
+  assert.deepEqual(tel.readTail(1024), []);
+  // File present but maxBytes=0 → no read at all.
+  appendFileSync(
+    path,
+    JSON.stringify({ ts: 1, usd_estimate: 0.01 }) + "\n",
+    "utf8"
+  );
+  assert.deepEqual(tel.readTail(0), []);
+});
+
+test("16.19 readTail with budget covering the whole file matches read()", () => {
+  const path = tempPath();
+  const tel = new TurnTelemetry(path);
+  for (let i = 0; i < 5; i++) {
+    appendFileSync(
+      path,
+      JSON.stringify({ ts: 1_000 + i, usd_estimate: i / 100 }) + "\n",
+      "utf8"
+    );
+  }
+  const all = tel.read();
+  const tail = tel.readTail(1024 * 1024);
+  assert.deepEqual(tail, all);
+});
+
+test("16.19 readTail trims older entries when bytes are capped", () => {
+  // Construct entries where each line is >= 50 bytes; cap at ~120
+  // bytes so only the last 1-2 lines fit. The leading partial-line
+  // boundary must be dropped, not parsed as malformed.
+  const path = tempPath();
+  const tel = new TurnTelemetry(path);
+  const lineFor = (i) =>
+    JSON.stringify({
+      ts: 1_700_000_000_000 + i,
+      idx: i,
+      pad: "x".repeat(40),
+    }) + "\n";
+  for (let i = 0; i < 50; i++) appendFileSync(path, lineFor(i), "utf8");
+
+  const fullCount = tel.read().length;
+  assert.equal(fullCount, 50);
+
+  // Capture stderr-dropped malformed warnings — the tail must NOT log
+  // a "skipped malformed line" for the partial leading line.
+  const errs = [];
+  const origErr = console.error;
+  console.error = (...a) => errs.push(a.join(" "));
+  let tail;
+  try {
+    tail = tel.readTail(120);
+  } finally {
+    console.error = origErr;
+  }
+  assert.ok(tail.length >= 1, "should return at least one trailing entry");
+  assert.ok(tail.length < fullCount, "should not return all entries");
+  // Whatever it returned, the indices must come from the END of the
+  // file — i.e. the largest possible idx values.
+  for (const e of tail) {
+    assert.ok(e.idx >= fullCount - tail.length - 1);
+  }
+  assert.deepEqual(
+    errs.filter((m) => m.includes("malformed")),
+    [],
+    "no malformed-line warnings expected"
+  );
+});
+
+test("16.19 readTail ignores partial leading line", () => {
+  // First "line" in the byte window is partial — JSON.parse would
+  // throw on it. The implementation must drop it silently.
+  const path = tempPath();
+  // Build a file where the byte cap lands mid-line: first record is
+  // long, second short. Cap < first record's size so the window
+  // starts inside record 1.
+  const tel = new TurnTelemetry(path);
+  appendFileSync(
+    path,
+    JSON.stringify({ ts: 1, idx: 1, pad: "y".repeat(200) }) + "\n",
+    "utf8"
+  );
+  appendFileSync(path, JSON.stringify({ ts: 2, idx: 2 }) + "\n", "utf8");
+  const errs = [];
+  const origErr = console.error;
+  console.error = (...a) => errs.push(a.join(" "));
+  let tail;
+  try {
+    tail = tel.readTail(80);
+  } finally {
+    console.error = origErr;
+  }
+  // Only the second (short) record fits cleanly after dropping the
+  // mid-line partial.
+  assert.deepEqual(tail.map((e) => e.idx), [2]);
+  assert.deepEqual(
+    errs.filter((m) => m.includes("malformed")),
+    []
+  );
+});
+
 test("11.5 lives under ~/.coding-buddy/ by default", async () => {
   const { DEFAULT_TURN_TELEMETRY_PATH } = await import(
     "../dist/turn-telemetry.js"

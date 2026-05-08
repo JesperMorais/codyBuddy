@@ -216,6 +216,94 @@ test("13.3 (a) telemetry read failure does not throw", () => {
   assert.equal(snap.ratePerHourUsd, 0);
 });
 
+test("16.19 RollingCostRate.snapshot prefers readTail when available", () => {
+  // Wire a fake telemetry that records which method was hit. The
+  // production code path must use readTail so the per-poll cost is
+  // bounded by readTailBytes, not by total file size.
+  const calls = [];
+  const fakeTel = {
+    read() {
+      calls.push("read");
+      return [];
+    },
+    readTail(maxBytes) {
+      calls.push(`readTail:${maxBytes}`);
+      return [];
+    },
+  };
+  const cr = new RollingCostRate({
+    turnTelemetry: fakeTel,
+    readTailBytes: 4096,
+  });
+  cr.snapshot();
+  assert.deepEqual(calls, ["readTail:4096"]);
+});
+
+test("16.19 RollingCostRate falls back to read() when readTailBytes=0", () => {
+  // Opt-out path: readTailBytes=0 means "I want the whole file" —
+  // useful for tests / one-shot CLIs that scan the entire log.
+  const calls = [];
+  const fakeTel = {
+    read() {
+      calls.push("read");
+      return [];
+    },
+    readTail() {
+      calls.push("readTail");
+      return [];
+    },
+  };
+  const cr = new RollingCostRate({
+    turnTelemetry: fakeTel,
+    readTailBytes: 0,
+  });
+  cr.snapshot();
+  assert.deepEqual(calls, ["read"]);
+});
+
+test("16.19 RollingCostRate falls back to read() when readTail is missing", () => {
+  // Pre-existing test doubles (and any external integration) may not
+  // implement readTail. The cost-rate must still work — degrade to
+  // read() rather than throw. Captures the same posture as the
+  // duck-typed fake at line 208.
+  const calls = [];
+  const fakeTel = {
+    read() {
+      calls.push("read");
+      return [];
+    },
+  };
+  const cr = new RollingCostRate({
+    turnTelemetry: fakeTel,
+    readTailBytes: 4096,
+  });
+  cr.snapshot();
+  assert.deepEqual(calls, ["read"]);
+});
+
+test("16.19 RollingCostRate.snapshot with bounded read still picks up recent turns", () => {
+  // End-to-end: real TurnTelemetry, real readTail path, real spend.
+  // Confirms the new default (readTail) doesn't change the observable
+  // outcome for a typically-sized window.
+  const tel = new TurnTelemetry(tempPath());
+  const clock = fakeClock();
+  const entry = record(tel, {
+    ts: clock.now() - 60_000,
+    sonnet: true,
+    sonnetIn: 333_333,
+    sonnetOut: 0,
+  });
+  const cr = new RollingCostRate({
+    turnTelemetry: tel,
+    windowMs: 10 * 60_000,
+    now: clock.now,
+    readTailBytes: 64 * 1024,
+  });
+  const snap = cr.snapshot();
+  assert.equal(snap.turnsInWindow, 1);
+  assert.ok(Math.abs(snap.spentUsd - entry.usd_estimate) < 1e-6);
+});
+
 // --- (b) WS wiring -----------------------------------------------
 
 async function bootDaemon(opts = {}) {

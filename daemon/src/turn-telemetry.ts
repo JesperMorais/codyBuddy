@@ -27,7 +27,16 @@
 // CI-stable. They're meant to be tuned via PR when Anthropic adjusts
 // list prices.
 
-import { mkdirSync, appendFileSync, existsSync, readFileSync } from "node:fs";
+import {
+  mkdirSync,
+  appendFileSync,
+  existsSync,
+  readFileSync,
+  statSync,
+  openSync,
+  readSync,
+  closeSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import type { UsageLike } from "./telemetry.js";
@@ -253,6 +262,83 @@ export class TurnTelemetry {
       );
     }
     return out;
+  }
+
+  /** Read only the trailing window of the file, capped at `maxBytes`.
+   *  Useful for callers (RollingCostRate) that only need the last few
+   *  minutes of entries — keeps cost O(maxBytes) regardless of total
+   *  file size, so a long-lived daemon doesn't re-parse a many-MB
+   *  log on every poll.
+   *
+   *  Strategy: stat → read the last `maxBytes` of the file → drop the
+   *  leading partial line (the boundary mid-line) → parse the rest with
+   *  the same per-line tolerance as `read()`. Entries strictly older
+   *  than the requested window may still be returned (the cap is on
+   *  bytes, not on entries) so callers should still filter by `ts`.
+   *
+   *  Tradeoff: a window that's *bigger* than the bytes covered by
+   *  `maxBytes` will under-count (real entries inside the window were
+   *  trimmed at the head). Pick a `maxBytes` budget several orders of
+   *  magnitude larger than typical per-window entry volume; for the
+   *  cost-rate use case (~30-90 turns per 10-min window, ~250 bytes
+   *  per JSONL line ≈ 25KB), 256KB is a 10× safety factor.
+   *
+   *  Task 16.19 — bound RollingCostRate read cost. */
+  readTail(maxBytes: number): TurnEntry[] {
+    if (maxBytes <= 0) return [];
+    if (!existsSync(this.filePath)) return [];
+    const size = statSync(this.filePath).size;
+    if (size === 0) return [];
+    const readBytes = Math.min(size, Math.floor(maxBytes));
+    const offset = size - readBytes;
+    const buf = Buffer.allocUnsafe(readBytes);
+    const fd = openSync(this.filePath, "r");
+    try {
+      let total = 0;
+      while (total < readBytes) {
+        const n = readSync(
+          fd,
+          buf,
+          total,
+          readBytes - total,
+          offset + total
+        );
+        if (n === 0) break;
+        total += n;
+      }
+      // total may be < readBytes only if the file shrank under us
+      // (unlikely for an append-only log). Slice to what we got.
+      const text = buf.toString("utf8", 0, total);
+      // Drop the leading partial line whenever we didn't read from the
+      // very start — without that we'd try to JSON.parse the tail of a
+      // truncated record and log a spurious "skipped malformed" line.
+      const startsAtFile = offset === 0;
+      const newlineIdx = text.indexOf("\n");
+      const usable =
+        startsAtFile || newlineIdx < 0 ? text : text.slice(newlineIdx + 1);
+      const out: TurnEntry[] = [];
+      let firstBadIndex = -1;
+      let badCount = 0;
+      const lines = usable.split("\n");
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        if (!line) continue;
+        try {
+          out.push(JSON.parse(line) as TurnEntry);
+        } catch {
+          badCount += 1;
+          if (firstBadIndex < 0) firstBadIndex = i;
+        }
+      }
+      if (badCount > 0) {
+        console.error(
+          `[turn-telemetry] skipped ${badCount} malformed line(s) in ${this.filePath} tail (first at offset-line ${firstBadIndex + 1})`
+        );
+      }
+      return out;
+    } finally {
+      closeSync(fd);
+    }
   }
 
   path(): string {
