@@ -10,6 +10,20 @@ import {
   enumerateAudioDevices,
   type AudioDeviceList,
 } from "./audio-devices.js";
+import { scrubSecrets } from "./redactor.js";
+
+// Task 16.5: Daemon stdout logs raw STT transcripts. If the user dictates
+// a secret aloud or reads one from screen, it lands in journalctl / log
+// files unredacted. Pass transcripts through scrubSecrets and truncate
+// to a fixed preview before logging so the log line still aids debugging
+// (length + first-K chars) without exposing full contents.
+export const TRANSCRIPT_LOG_PREVIEW_CHARS = 80;
+export function transcriptLogPreview(text: string): string {
+  const { text: scrubbed } = scrubSecrets(text);
+  const head = scrubbed.slice(0, TRANSCRIPT_LOG_PREVIEW_CHARS);
+  const truncated = scrubbed.length > TRANSCRIPT_LOG_PREVIEW_CHARS ? "…" : "";
+  return `len=${text.length} preview="${head}${truncated}"`;
+}
 
 export interface ServerDeps {
   session: Session;
@@ -272,7 +286,7 @@ export function startServer(deps: ServerDeps): WebSocketServer & DemoToggle {
               }
               console.log(`[recorder] captured ${r.wav.length} bytes in ${r.durationMs}ms`);
               const text = await stt.transcribe(r.wav);
-              console.log(`[transcribe] → "${text}"`);
+              console.log(`[transcribe] → ${transcriptLogPreview(text)}`);
               ws.send(JSON.stringify({ type: "transcribed", requestId, ok: true, text }));
             } catch (err) {
               const errMsg = err instanceof Error ? err.message : String(err);
@@ -294,7 +308,7 @@ export function startServer(deps: ServerDeps): WebSocketServer & DemoToggle {
             console.log(`[transcribe] received ${buf.length} bytes`);
             try {
               const text = await stt.transcribe(buf);
-              console.log(`[transcribe] → "${text}"`);
+              console.log(`[transcribe] → ${transcriptLogPreview(text)}`);
               ws.send(JSON.stringify({ type: "transcribed", requestId, ok: true, text }));
             } catch (err) {
               const errMsg = err instanceof Error ? err.message : String(err);
