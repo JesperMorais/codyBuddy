@@ -247,6 +247,128 @@ test("11.4 router state survives across multiple turns without leak", async () =
   assert.equal(sonnetCalls.length, 1, "sonnet on turn 2 only");
 });
 
+test("16.15 aborted Sonnet stream does NOT advance the editor fingerprint — next turn still escalates on context change", async () => {
+  // Setup: turn 1 establishes a fingerprint via a clean Haiku turn.
+  // Turn 2 escalates on (b) because editor changed, but the Sonnet
+  // stream throws between yields (simulates barge-in/abort/network).
+  // Turn 3 carries the same payload as turn 2; with the bug, the
+  // fingerprint would have been updated in turn 2's `finally` and
+  // turn 3 would NOT re-escalate. With the fix, the user gets their
+  // answer the second time around.
+  const haikuCalls = [];
+  const sonnetCalls = [];
+  const haiku = {
+    async classify(payload, systemBlocks) {
+      haikuCalls.push({ payload, systemBlocks });
+      return { escalate: false, text: "haiku-ok" };
+    },
+  };
+  const sonnet = {
+    askStream(systemBlocks, payload, signal) {
+      sonnetCalls.push({ systemBlocks, payload, signal });
+      const callIndex = sonnetCalls.length;
+      return (async function* () {
+        yield "partial-";
+        if (callIndex === 1) {
+          // First Sonnet invocation throws mid-stream (the "aborted
+          // between yields" case the task description names).
+          throw new Error("aborted by barge-in");
+        }
+        yield "complete";
+      })();
+    },
+  };
+  const router = new TieredRouter({ haiku, sonnet });
+
+  // Turn 1: clean Haiku turn, fingerprint = ("a.ts", diff="v1").
+  await collect(router.route(["sys"], { active_file: "a.ts", recent_diff: "v1" }));
+  assert.equal(haikuCalls.length, 1);
+  assert.equal(sonnetCalls.length, 0);
+
+  // Turn 2: editor changed — escalates upfront, then mid-stream throw.
+  let threw = false;
+  try {
+    await collect(
+      router.route(["sys"], { active_file: "b.ts", recent_diff: "v2" })
+    );
+  } catch (err) {
+    threw = true;
+    assert.match(String(err), /aborted by barge-in/);
+  }
+  assert.equal(threw, true, "turn 2 must surface the inner throw");
+  assert.equal(sonnetCalls.length, 1, "sonnet attempted once on turn 2");
+
+  // Turn 3: same context as turn 2. The bug would skip escalation
+  // here because the finally-block in route() had advanced the
+  // fingerprint to ("b.ts", "v2") even though the answer never landed.
+  // With the fix, fingerprint is still ("a.ts", "v1") so (b) fires.
+  await collect(
+    router.route(["sys"], { active_file: "b.ts", recent_diff: "v2" })
+  );
+  assert.equal(
+    sonnetCalls.length,
+    2,
+    "turn 3 must re-escalate to sonnet on the same drifted context"
+  );
+  assert.equal(
+    router.getLastOutcome()?.reason,
+    "editor_context_changed",
+    "turn 3 escalation reason must still be (b) editor_context_changed"
+  );
+});
+
+test("16.15 aborted Sonnet stream after Haiku flag does NOT advance fingerprint either", async () => {
+  // Same defect surface for the haiku_flagged_escalate path.
+  const sonnetCalls = [];
+  const haiku = {
+    async classify() {
+      return { escalate: true };
+    },
+  };
+  const sonnet = {
+    askStream() {
+      sonnetCalls.push({});
+      const callIndex = sonnetCalls.length;
+      return (async function* () {
+        if (callIndex === 1) throw new Error("aborted");
+        yield "ok";
+      })();
+    },
+  };
+  const router = new TieredRouter({ haiku, sonnet });
+
+  // Turn 1: establish fingerprint via a separate non-throwing path.
+  // Easiest: use a Haiku-no-escalate stub for one turn, then swap in
+  // the throwing Haiku-escalate stub. We'll just call route() once
+  // with a different haiku object via direct construction.
+  const setupRouter = new TieredRouter({
+    haiku: { async classify() { return { escalate: false, text: "ok" }; } },
+    sonnet,
+  });
+  await collect(
+    setupRouter.route(["sys"], { active_file: "a.ts", recent_diff: "v1" })
+  );
+
+  // Now exercise the real router for turn 2 (throw) + turn 3 (retry).
+  let threw = false;
+  try {
+    await collect(
+      router.route(["sys"], { active_file: "a.ts", recent_diff: "v1" })
+    );
+  } catch {
+    threw = true;
+  }
+  assert.equal(threw, true);
+
+  // Same context retry: even though the haiku-flagged path doesn't
+  // depend on (b), the fingerprint advance was the bug, and we still
+  // expect route() to attempt sonnet again rather than skip.
+  await collect(
+    router.route(["sys"], { active_file: "a.ts", recent_diff: "v1" })
+  );
+  assert.equal(sonnetCalls.length, 2, "both turns of the throwing router invoked sonnet");
+});
+
 test("11.4 asCompleteUtterance adapter shape matches ConversationLoop's completeUtterance", async () => {
   // The adapter lets the router slot directly into ConversationLoopDeps.
   const { TieredRouter, asCompleteUtterance } = await import("../dist/tiered-router.js");

@@ -129,8 +129,13 @@ export class TieredRouter {
   }
 
   /** Route one conversational turn. Yields text deltas from whichever
-   *  tier handles it. The editor fingerprint is updated after the
-   *  turn so the *next* call can detect context drift via (b). */
+   *  tier handles it. The editor fingerprint is updated only after a
+   *  *successful* completion of the turn — Task 16.15. If the inner
+   *  stream throws or is aborted (barge-in mid-reply, network drop),
+   *  we leave `lastEditorFingerprint` unchanged so the very next turn
+   *  carrying the same editor context still trips condition (b) and
+   *  re-escalates. Otherwise the user would lose their answer to a
+   *  cancelled turn AND get downgraded to Haiku on the retry. */
   async *route(
     systemBlocks: string[],
     payload: object,
@@ -140,13 +145,10 @@ export class TieredRouter {
     if (upfront.escalate) {
       this.lastOutcome = { tier: "sonnet", reason: upfront.reason };
       this.log(`[router] sonnet (${upfront.reason})`);
-      try {
-        for await (const chunk of this.opts.sonnet.askStream(systemBlocks, payload, signal)) {
-          yield chunk;
-        }
-      } finally {
-        this.updateFingerprint(payload);
+      for await (const chunk of this.opts.sonnet.askStream(systemBlocks, payload, signal)) {
+        yield chunk;
       }
+      this.updateFingerprint(payload);
       return;
     }
 
@@ -154,23 +156,17 @@ export class TieredRouter {
     if (verdict.escalate) {
       this.lastOutcome = { tier: "sonnet", reason: "haiku_flagged_escalate" };
       this.log(`[router] sonnet (haiku_flagged_escalate)`);
-      try {
-        for await (const chunk of this.opts.sonnet.askStream(systemBlocks, payload, signal)) {
-          yield chunk;
-        }
-      } finally {
-        this.updateFingerprint(payload);
+      for await (const chunk of this.opts.sonnet.askStream(systemBlocks, payload, signal)) {
+        yield chunk;
       }
+      this.updateFingerprint(payload);
       return;
     }
 
     this.lastOutcome = { tier: "haiku", reason: "no_escalation" };
     this.log(`[router] haiku`);
-    try {
-      yield verdict.text;
-    } finally {
-      this.updateFingerprint(payload);
-    }
+    yield verdict.text;
+    this.updateFingerprint(payload);
   }
 
   /** Last routing decision — for telemetry / tests. Undefined before
