@@ -130,6 +130,14 @@ export function startServer(deps: ServerDeps): WebSocketServer & DemoToggle {
   const wss = new WebSocketServer({
     host: "127.0.0.1",
     port,
+    // Cap incoming WS messages at 8 MiB (#95). The ws library default
+    // is 100 MiB, which lets any local client RAM-bomb the daemon by
+    // shipping a giant base64 audio payload to the `transcribe`
+    // handler. 8 MiB covers ~5min of 16kHz mono PCM as base64 — well
+    // above any legit push-to-talk turn — and outsized messages get
+    // rejected at the wire boundary (close code 1009, "message too
+    // big") before JSON.parse runs.
+    maxPayload: 8 * 1024 * 1024,
     verifyClient: ({ origin }, cb) => {
       if (origin) {
         console.warn(`[buddy-daemon] rejecting WS connect with Origin=${origin}`);
@@ -158,6 +166,15 @@ export function startServer(deps: ServerDeps): WebSocketServer & DemoToggle {
 
   wss.on("connection", (ws: WebSocket) => {
     console.log("[buddy-daemon] extension connected");
+    // Per-socket error sink (#95). Without this, errors from the ws
+    // receiver — most notably the RangeError that fires when a
+    // client exceeds `maxPayload` — propagate as an uncaught
+    // exception and crash the daemon. The library still tears the
+    // connection down on its own; we just need to keep the process
+    // alive.
+    ws.on("error", (err) => {
+      console.warn(`[buddy-daemon] ws error: ${err.message}`);
+    });
     ws.send(modeAck(true));
     ws.send(
       JSON.stringify({
@@ -305,6 +322,26 @@ export function startServer(deps: ServerDeps): WebSocketServer & DemoToggle {
               break;
             }
             const buf = Buffer.from(b64, "base64");
+            // Inner-ring guard (#95). The 8 MiB WS-level cap stops
+            // outsized base64 strings at the wire; this stops a
+            // base64-just-under-cap whose decoded buffer is still
+            // bigger than any legit push-to-talk turn (4 MiB of
+            // int16 PCM @ 16kHz mono ≈ 130s of audio).
+            const MAX_DECODED_AUDIO_BYTES = 4 * 1024 * 1024;
+            if (buf.length > MAX_DECODED_AUDIO_BYTES) {
+              console.warn(
+                `[transcribe] reject ${buf.length} bytes (cap=${MAX_DECODED_AUDIO_BYTES})`
+              );
+              ws.send(
+                JSON.stringify({
+                  type: "transcribed",
+                  requestId,
+                  ok: false,
+                  error: "audio too large",
+                })
+              );
+              break;
+            }
             console.log(`[transcribe] received ${buf.length} bytes`);
             try {
               const text = await stt.transcribe(buf);
