@@ -20,6 +20,23 @@ const DENY_PATTERNS = [
   /\.pem$/i,
   /\.key$/i,
   /id_rsa(\.|$)/i,
+  /(^|[\\/])id_(ed25519|ecdsa|dsa)(\.|$)/i,
+  /(^|[\\/])\.npmrc$/i,
+  /(^|[\\/])(\.netrc|_netrc)$/i,
+  /(^|[\\/])\.pgpass$/i,
+  /(^|[\\/])\.git-credentials$/i,
+  /(^|[\\/])\.git[\\/]config$/i,
+  /(^|[\\/])\.aws[\\/](credentials|config)$/i,
+  /\.kubeconfig$/i,
+  /(^|[\\/])kubeconfig$/i,
+  /(^|[\\/])\.kube[\\/]config$/i,
+  /\.ovpn$/i,
+  /(^|[\\/])wg\d*\.conf$/i,
+  /(^|[\\/])\.ssh[\\/]config$/i,
+  /\.ppk$/i,
+  /\.kdbx?$/i,
+  /(^|[\\/])\.docker[\\/]config\.json$/i,
+  /(^|[\\/])\.?composer[\\/]auth\.json$/i,
 ];
 
 const SECRET_REGEXES: RegExp[] = [
@@ -29,6 +46,13 @@ const SECRET_REGEXES: RegExp[] = [
   /\bghp_[A-Za-z0-9]{36}\b/g,
   /\bghs_[A-Za-z0-9]{36}\b/g,
   /\bxox[abp]-[A-Za-z0-9-]{10,}\b/g,
+  /\bAIza[0-9A-Za-z_-]{35}\b/g,
+  /\b(sk|rk|pk)_live_[0-9A-Za-z]{16,}\b/g,
+  /\beyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g,
+  /\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?):\/\/[^\s:/@]+:[^\s@]+@/gi,
+  /\bglpat-[A-Za-z0-9_-]{20,}\b/g,
+  /\bnpm_[A-Za-z0-9]{36}\b/g,
+  /\b[A-Z][A-Z0-9_]*(?:API|TOKEN|SECRET|PASSWORD|KEY)\s*=\s*['"]?[^\s'"]+/g,
 ];
 
 export function isDeniedFile(path: string): boolean {

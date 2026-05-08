@@ -123,3 +123,141 @@ test("scrubSecrets leaves short look-alikes that don't match the patterns", () =
   assert.equal(result.text, input);
   assert.equal(result.hits, 0);
 });
+
+// --------------------------------------------------------------------------
+// 16.6 — extended coverage (new SECRET_REGEXES + DENY_PATTERNS)
+// --------------------------------------------------------------------------
+
+test("16.6 isDeniedFile rejects new credential file shapes", () => {
+  // SSH legacy/modern keys (id_rsa already covered above; cover the rest).
+  assert.equal(isDeniedFile("/home/u/.ssh/id_ed25519"), true);
+  assert.equal(isDeniedFile("/home/u/.ssh/id_ecdsa"), true);
+  assert.equal(isDeniedFile("/home/u/.ssh/id_dsa"), true);
+  assert.equal(isDeniedFile("/home/u/.ssh/id_ed25519.pub"), true);
+  assert.equal(isDeniedFile("/home/u/.ssh/config"), true);
+  // Package/registry credential files.
+  assert.equal(isDeniedFile("/home/u/.npmrc"), true);
+  assert.equal(isDeniedFile("/home/u/.netrc"), true);
+  assert.equal(isDeniedFile("C:\\Users\\u\\_netrc"), true);
+  // DB / git credential helpers.
+  assert.equal(isDeniedFile("/home/u/.pgpass"), true);
+  assert.equal(isDeniedFile("/home/u/.git-credentials"), true);
+  assert.equal(isDeniedFile("/repo/.git/config"), true);
+  // Cloud/k8s configs.
+  assert.equal(isDeniedFile("/home/u/.aws/credentials"), true);
+  assert.equal(isDeniedFile("/home/u/.aws/config"), true);
+  assert.equal(isDeniedFile("/home/u/.kube/config"), true);
+  assert.equal(isDeniedFile("/tmp/staging.kubeconfig"), true);
+  assert.equal(isDeniedFile("/etc/kubernetes/kubeconfig"), true);
+  // VPN configs.
+  assert.equal(isDeniedFile("/etc/openvpn/client.ovpn"), true);
+  assert.equal(isDeniedFile("/etc/wireguard/wg0.conf"), true);
+  assert.equal(isDeniedFile("/etc/wireguard/wg.conf"), true);
+  // PuTTY / KeePass.
+  assert.equal(isDeniedFile("C:\\keys\\session.ppk"), true);
+  assert.equal(isDeniedFile("vault.kdbx"), true);
+  assert.equal(isDeniedFile("legacy.kdb"), true);
+  // Container/composer auth.
+  assert.equal(isDeniedFile("/home/u/.docker/config.json"), true);
+  assert.equal(isDeniedFile("/home/u/.composer/auth.json"), true);
+  assert.equal(isDeniedFile("/home/u/composer/auth.json"), true);
+});
+
+test("16.6 isDeniedFile still allows ordinary files that look superficially close", () => {
+  // We do not want package.json, tsconfig.json, server.config.json blocked.
+  assert.equal(isDeniedFile("config.json"), false);
+  assert.equal(isDeniedFile("server/config.json"), false);
+  assert.equal(isDeniedFile("auth.json"), false);
+  assert.equal(isDeniedFile("client/auth.json"), false);
+  assert.equal(isDeniedFile("kube.ts"), false);
+  assert.equal(isDeniedFile("ssh-helper.ts"), false);
+});
+
+test("16.6 scrubSecrets redacts Google API keys", () => {
+  const input = "GOOGLE = 'AIza" + "B".repeat(35) + "'";
+  const result = scrubSecrets(input);
+  assert.ok(!result.text.includes("AIzaB"));
+  assert.ok(result.text.includes("<REDACTED-SECRET>"));
+  assert.ok(result.hits >= 1);
+});
+
+test("16.6 scrubSecrets redacts Stripe live keys (sk/rk/pk live)", () => {
+  const input = "sk_live_abcdefghijklmnop and rk_live_ABCDEFGHIJKLMNOP and pk_live_0123456789ABCDEF";
+  const result = scrubSecrets(input);
+  assert.ok(!result.text.includes("sk_live_abcdefghijklmnop"));
+  assert.ok(!result.text.includes("rk_live_"));
+  assert.ok(!result.text.includes("pk_live_"));
+  assert.equal(result.hits, 3);
+});
+
+test("16.6 scrubSecrets redacts JWTs (three base64url segments separated by dots)", () => {
+  const jwt =
+    "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NSIsIm5hbWUiOiJBbGljZSJ9.signaturepartXyZ";
+  const result = scrubSecrets("Authorization: Bearer " + jwt);
+  assert.ok(!result.text.includes(jwt));
+  assert.ok(result.text.includes("<REDACTED-SECRET>"));
+});
+
+test("16.6 scrubSecrets redacts DB connection strings with embedded credentials", () => {
+  const input =
+    "DB=postgres://alice:hunter2@db.example.com:5432/app and " +
+    "MONGO=mongodb+srv://u:p@cluster.mongodb.net/x and " +
+    "MY=mysql://root:rootpw@localhost/db";
+  const result = scrubSecrets(input);
+  assert.ok(!result.text.includes("hunter2"));
+  assert.ok(!result.text.includes(":p@"));
+  assert.ok(!result.text.includes("rootpw"));
+});
+
+test("16.6 scrubSecrets redacts GitLab and npm tokens", () => {
+  const input = "glpat-aaaaaaaaaaaaaaaaaaaa and npm_" + "a".repeat(36);
+  const result = scrubSecrets(input);
+  assert.ok(!result.text.includes("glpat-a"));
+  assert.ok(!result.text.includes("npm_aaaaa"));
+  assert.equal(result.hits, 2);
+});
+
+test("16.6 scrubSecrets generic UPPER_CASE_KEY=value catches misc env-style secrets", () => {
+  const input =
+    'MY_SERVICE_API="abc123xyz"\n' +
+    "OTHER_TOKEN=plain-token-value\n" +
+    "APP_PASSWORD='topsecret'\n" +
+    "FOO_SECRET=hunter2";
+  const result = scrubSecrets(input);
+  // Each of the four lines should produce one hit.
+  assert.ok(result.hits >= 4, `expected at least 4 hits, got ${result.hits}`);
+  assert.ok(!result.text.includes("abc123xyz"));
+  assert.ok(!result.text.includes("plain-token-value"));
+  assert.ok(!result.text.includes("topsecret"));
+  assert.ok(!result.text.includes("hunter2"));
+});
+
+test("16.6 scrubSecrets handles a .env-style fixture with one of each new pattern", () => {
+  // One representative value per new pattern. Total expected hits =
+  // 7 distinct new-pattern matches in this fixture (Google, Stripe, JWT,
+  // DB-conn, GitLab, npm, generic UPPER_KEY=). We verify that count
+  // exactly so future drift is loud.
+  const fixture = [
+    "GOOGLE_API_KEY=AIza" + "C".repeat(35),
+    "STRIPE=sk_live_abcdefghijklmnopqr",
+    "JWT=eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ4In0.zzz",
+    "DATABASE_URL=postgres://user:pass@host/db",
+    "GITLAB_TOKEN=glpat-abcdefghijklmnopqrst",
+    "NPM_TOKEN=npm_" + "z".repeat(36),
+    "OTHER_SECRET=plain-value",
+  ].join("\n");
+  const result = scrubSecrets(fixture);
+  // The generic UPPER_KEY= pattern overlaps with the targeted ones above
+  // (e.g. STRIPE=…, GITLAB_TOKEN=…). The targeted patterns run first in
+  // order, so each line resolves to exactly one redaction. Expect one
+  // redaction marker per fixture line.
+  const placeholders = (result.text.match(/<REDACTED-SECRET>/g) ?? []).length;
+  assert.equal(placeholders, 7, `each line should produce one redaction; got ${placeholders} in: ${result.text}`);
+  assert.ok(!result.text.includes("AIzaC"));
+  assert.ok(!result.text.includes("sk_live_abc"));
+  assert.ok(!result.text.includes("eyJhbGciOiJIUzI1NiJ9.eyJ"));
+  assert.ok(!result.text.includes("user:pass@"));
+  assert.ok(!result.text.includes("glpat-abc"));
+  assert.ok(!result.text.includes("npm_zzz"));
+  assert.ok(!result.text.includes("plain-value"));
+});
