@@ -234,7 +234,7 @@ A four-auditor + two-challenger pass found real defects across the code shipped 
   - ~~`daemon/src/vad-bridge.ts:142-144` doesn't surface socket errors to caller — only logs. Add `errorHandlers` for transient socket errors so a host can backoff/alert.~~ (see #171)
   - `daemon/src/voice-sidecar.ts:74-77` doesn't auto-restart on uvicorn crash — only logs the exit. Add an opt-in restart-with-backoff.
   - `daemon/src/tiered-router.ts:194` fingerprint embeds the full diff text. Use a hash for diffs over a few KB.
-  - `daemon/src/turn-telemetry.ts:209-215` re-parses the entire `turns.jsonl` on every `RollingCostRate` poll. Cap the read window or stream-tail the file.
+  - ~~`daemon/src/turn-telemetry.ts:209-215` re-parses the entire `turns.jsonl` on every `RollingCostRate` poll. Cap the read window or stream-tail the file.~~ (see #172)
   - `daemon/src/session.ts:204-209` builds `recent_chat` as `{trigger, user_question, reply_mode, reply_text}` while `tiered-router.ts:174-180` expects `{role, text}` — `estimateTranscriptTokens` would return 0 if Session-shaped turns ever flowed through the router. Pick one shape (probably `{role, text}` since that's what 10.9's payload assembler emits) and converge.
 
 ---
