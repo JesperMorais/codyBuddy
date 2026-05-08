@@ -246,3 +246,134 @@ test("7.2 (k) chat() throws on non-2xx — surfaces in ask()", async () => {
     cleanup();
   }
 });
+
+// --------------------------------------------------------------------------
+// askStream() — Task 16.7(a) + (b)
+// --------------------------------------------------------------------------
+
+/** Build an SSE response body from a list of `{delta?, usage?}` chunks
+ *  followed by the OpenAI `data: [DONE]` sentinel. */
+function sseBody(chunks) {
+  const lines = [];
+  for (const c of chunks) {
+    const obj = {};
+    if (c.delta !== undefined) obj.choices = [{ delta: { content: c.delta } }];
+    if (c.usage !== undefined) {
+      // OpenAI's stream-with-usage convention: trailing chunk with
+      // empty choices and a populated `usage`.
+      if (!obj.choices) obj.choices = [];
+      obj.usage = c.usage;
+    }
+    lines.push(`data: ${JSON.stringify(obj)}\n\n`);
+  }
+  lines.push("data: [DONE]\n\n");
+  return lines.join("");
+}
+
+function makeStreamingFetch(sse) {
+  const calls = [];
+  const fakeFetch = async (url, init) => {
+    calls.push({ url: String(url), init });
+    return new Response(sse, {
+      status: 200,
+      headers: { "Content-Type": "text/event-stream" },
+    });
+  };
+  return { fakeFetch, calls };
+}
+
+test("16.7 (a) askStream records telemetry from the trailing usage chunk", async () => {
+  const sse = sseBody([
+    { delta: "hello " },
+    { delta: "world" },
+    { usage: { prompt_tokens: 321, completion_tokens: 7 } },
+  ]);
+  const { fakeFetch } = makeStreamingFetch(sse);
+  const { telemetry, cleanup } = freshTelemetry();
+  try {
+    const client = new OllamaClient({ fetchImpl: fakeFetch, telemetry });
+    const out = [];
+    for await (const t of client.askStream(["sys"], { trigger: "x" })) {
+      out.push(t);
+    }
+    assert.deepEqual(out, ["hello ", "world"]);
+
+    // Per-call telemetry under method=askStream.
+    const entries = telemetry.read();
+    assert.equal(entries.length, 1);
+    assert.equal(entries[0].method, "askStream");
+    assert.equal(entries[0].model, "qwen2.5-coder:32b");
+    assert.equal(entries[0].input_tokens, 321);
+    assert.equal(entries[0].output_tokens, 7);
+
+    // getLastUsage() snapshot (mirrors AnthropicClient).
+    const last = client.getLastUsage();
+    assert.ok(last, "getLastUsage should be populated after askStream");
+    assert.equal(last.model, "qwen2.5-coder:32b");
+    assert.equal(last.usage.input_tokens, 321);
+    assert.equal(last.usage.output_tokens, 7);
+  } finally {
+    cleanup();
+  }
+});
+
+test("16.7 (b) askStream sends max_tokens=400 (parity with Anthropic)", async () => {
+  const sse = sseBody([{ delta: "ok" }]);
+  const { fakeFetch, calls } = makeStreamingFetch(sse);
+  const { telemetry, cleanup } = freshTelemetry();
+  try {
+    const client = new OllamaClient({ fetchImpl: fakeFetch, telemetry });
+    // Drain the stream.
+    for await (const _ of client.askStream(["sys"], { t: "x" })) {
+      // ignore
+    }
+    assert.equal(calls.length, 1);
+    const body = JSON.parse(calls[0].init.body);
+    assert.equal(body.stream, true);
+    assert.equal(body.max_tokens, 400);
+    // Also confirm we asked the server to include usage in the stream.
+    assert.ok(body.stream_options);
+    assert.equal(body.stream_options.include_usage, true);
+  } finally {
+    cleanup();
+  }
+});
+
+test("16.7 (a) askStream resets getLastUsage at start of each call", async () => {
+  // Two calls back-to-back: only the second has a usage chunk; the
+  // first's value must NOT leak into the second's getLastUsage().
+  const responses = [
+    sseBody([
+      { delta: "first" },
+      { usage: { prompt_tokens: 100, completion_tokens: 5 } },
+    ]),
+    sseBody([{ delta: "second" }]),
+  ];
+  const calls = [];
+  const fakeFetch = async (url, init) => {
+    calls.push({ url: String(url), init });
+    return new Response(responses.shift(), {
+      status: 200,
+      headers: { "Content-Type": "text/event-stream" },
+    });
+  };
+  const { telemetry, cleanup } = freshTelemetry();
+  try {
+    const client = new OllamaClient({ fetchImpl: fakeFetch, telemetry });
+    for await (const _ of client.askStream(["sys"], { t: 1 })) {
+      // drain
+    }
+    const after1 = client.getLastUsage();
+    assert.equal(after1.usage.input_tokens, 100);
+
+    for await (const _ of client.askStream(["sys"], { t: 2 })) {
+      // drain
+    }
+    // Second call had no usage chunk — getLastUsage must not still
+    // report the first call's numbers.
+    const after2 = client.getLastUsage();
+    assert.equal(after2, undefined);
+  } finally {
+    cleanup();
+  }
+});

@@ -193,6 +193,41 @@ test("11.5 USD estimate matches the documented pricing formula", () => {
   assert.ok(fallbackUsd > 0);
 });
 
+// Task 16.7(c): local Ollama-shaped model ids price at $0.
+test("16.7 estimateUsd returns $0 for Ollama-shaped local model ids", () => {
+  // qwen2.5-coder:32b — the daemon's DEFAULT_OLLAMA_MODEL.
+  const qwenUsd = estimateUsd("qwen2.5-coder:32b", {
+    input_tokens: 1_000_000,
+    output_tokens: 1_000_000,
+    cache_read_input_tokens: 1_000_000,
+    cache_creation_input_tokens: 1_000_000,
+  });
+  assert.equal(qwenUsd, 0, "qwen local model should be free");
+
+  // Other common Ollama model shapes.
+  for (const id of ["llama3.1:8b", "mistral:7b", "gemma2:27b"]) {
+    const usd = estimateUsd(id, { input_tokens: 1_000_000, output_tokens: 1_000_000 });
+    assert.equal(usd, 0, `${id} should price at $0`);
+  }
+});
+
+test("16.7 turn record with Ollama model has usd_estimate=0", () => {
+  // A turn that ran entirely on a local model: the resulting record
+  // should report $0, not the Sonnet-fallback fictional dollar amount.
+  const path = tempPath();
+  const tel = new TurnTelemetry(path);
+  const entry = tel.record({
+    sonnetModel: "qwen2.5-coder:32b",
+    sonnetUsage: { input_tokens: 5_000, output_tokens: 800 },
+    routerReason: "trigger=EXPLICIT_ASK",
+    endToEndMs: 2200,
+    wakeWord: "off",
+    personality: "nice",
+    mode: "tutor",
+  });
+  assert.equal(entry.usd_estimate, 0);
+});
+
 test("11.5 USD estimate sums across tiers in a single turn", () => {
   const path = tempPath();
   const tel = new TurnTelemetry(path);

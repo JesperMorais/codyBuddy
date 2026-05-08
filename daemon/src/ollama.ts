@@ -11,10 +11,15 @@
 
 import type { AiClient, BuddyReply, SpeakDecision } from "./anthropic.js";
 import type { MisconceptionMap } from "./memory.js";
-import { Telemetry } from "./telemetry.js";
+import { Telemetry, type UsageLike, type UsageRecord } from "./telemetry.js";
 
 const DEFAULT_BASE_URL = "http://localhost:11434/v1";
 export const DEFAULT_OLLAMA_MODEL = "qwen2.5-coder:32b";
+
+/** Task 16.7: parity cap with AnthropicClient.askStream so local
+ *  models can't run unboundedly under the streaming path. Anthropic
+ *  caps at 400 in `askStream` and `ask`; mirror that here. */
+const ASK_STREAM_MAX_TOKENS = 400;
 
 export interface OllamaClientOptions {
   baseUrl?: string;
@@ -38,12 +43,26 @@ export class OllamaClient implements AiClient {
   private model: string;
   private fetchFn: typeof fetch;
   private telemetry: Telemetry;
+  /** Task 16.7: last askStream usage (mirrors AnthropicClient so the
+   *  TieredRouter / TurnTelemetry consumers can read the streamed
+   *  turn's token counts via getLastUsage()). Cleared at the start of
+   *  each askStream call so an aborted call doesn't leak the previous
+   *  turn's usage into the next one's read. */
+  private lastStreamUsage?: UsageRecord;
 
   constructor(opts: OllamaClientOptions = {}) {
     this.baseUrl = (opts.baseUrl ?? DEFAULT_BASE_URL).replace(/\/$/, "");
     this.model = opts.model ?? DEFAULT_OLLAMA_MODEL;
     this.fetchFn = opts.fetchImpl ?? fetch;
     this.telemetry = opts.telemetry ?? new Telemetry();
+  }
+
+  /** Returns the (model, usage) for the most recent askStream call,
+   *  or undefined if none has completed since construction. Mirrors
+   *  AnthropicClient.getLastUsage so the TieredRouter consumes the
+   *  same shape regardless of provider — Task 16.7(a). */
+  getLastUsage(): UsageRecord | undefined {
+    return this.lastStreamUsage;
   }
 
   private async chat(method: string, messages: Array<{ role: string; content: string }>, maxTokens: number): Promise<string> {
@@ -85,6 +104,9 @@ export class OllamaClient implements AiClient {
       if (signal.aborted) return;
       signal.addEventListener("abort", onParentAbort, { once: true });
     }
+    // Task 16.7: reset per-call so an aborted askStream doesn't leak
+    // the previous turn's usage into the next one's getLastUsage() read.
+    this.lastStreamUsage = undefined;
     let res: Response;
     try {
       res = await this.fetchFn(`${this.baseUrl}/chat/completions`, {
@@ -93,6 +115,14 @@ export class OllamaClient implements AiClient {
         body: JSON.stringify({
           model: this.model,
           stream: true,
+          // Task 16.7: parity with AnthropicClient.askStream — bound the
+          // local model's output so a runaway generation can't hold the
+          // conversation loop in SPEAKING indefinitely.
+          max_tokens: ASK_STREAM_MAX_TOKENS,
+          // Ask the OpenAI-compatible endpoint to include usage in the
+          // final SSE chunk so we can record per-stream telemetry the
+          // same way `chat()` does for non-streaming calls.
+          stream_options: { include_usage: true },
           messages: [
             { role: "system", content: system },
             { role: "user", content: userText },
@@ -119,6 +149,11 @@ export class OllamaClient implements AiClient {
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buf = "";
+    // Task 16.7(a): captured from the final SSE chunk when the server
+    // honors `stream_options.include_usage:true`. Recorded to
+    // telemetry + lastStreamUsage in the finally block so an aborted
+    // mid-stream still flushes whatever usage we observed.
+    let streamedUsage: UsageLike | undefined;
     try {
       while (true) {
         if (signal?.aborted) break;
@@ -137,7 +172,17 @@ export class OllamaClient implements AiClient {
           try {
             const obj = JSON.parse(payload) as {
               choices?: Array<{ delta?: { content?: string } }>;
+              usage?: { prompt_tokens?: number; completion_tokens?: number };
             };
+            // OpenAI's stream-with-usage convention: a trailing chunk
+            // with `usage` populated and (typically) `choices: []`.
+            // Always update — the last seen wins.
+            if (obj.usage) {
+              streamedUsage = {
+                input_tokens: obj.usage.prompt_tokens,
+                output_tokens: obj.usage.completion_tokens,
+              };
+            }
             const delta = obj.choices?.[0]?.delta?.content;
             if (typeof delta === "string" && delta.length > 0) yield delta;
           } catch {
@@ -153,6 +198,18 @@ export class OllamaClient implements AiClient {
         // ignore
       }
       if (signal) signal.removeEventListener("abort", onParentAbort);
+      // Task 16.7(a): record streamed-turn telemetry the same way
+      // `chat()` does for non-streaming calls. Mirrors
+      // AnthropicClient.recordStreamUsage. Errors are swallowed —
+      // telemetry must not break the live trigger path.
+      if (streamedUsage) {
+        try {
+          this.telemetry.record("askStream", this.model, streamedUsage);
+          this.lastStreamUsage = { model: this.model, usage: streamedUsage };
+        } catch {
+          // ignore
+        }
+      }
     }
   }
 
