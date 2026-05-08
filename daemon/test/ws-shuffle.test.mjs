@@ -162,6 +162,79 @@ test("9.8 (d) setShuffle:false turns it off", async () => {
   }
 });
 
+test("16.16 (e) modeSet broadcasts the seed personality, not the per-trigger shuffle roll", async () => {
+  // Wire up a deterministic shuffle so the runtime overlay rolls away
+  // from the seed on the very first trigger. The modeAck after a mode
+  // change must still report the seed — otherwise the sidebar dropdown
+  // would appear to drift on every turn even though the user's
+  // configured personality hasn't changed.
+  const fake = new (await import("./fakes.mjs")).FakeAnthropicClient({
+    replies: [{ mode: "chat", text: "ok", wants_followup: false }],
+  });
+  const prompts = new Map([["tutor", "fake tutor system prompt"]]);
+  const personalities = new Map([
+    ["nice", "nice overlay"],
+    ["dry", "dry overlay"],
+    ["pirate", "pirate overlay"],
+  ]);
+  const memDir = mkdtempSync(join(tmpdir(), "buddy-ws-shuffle-seed-"));
+  const memory = new MemoryStore(memDir);
+  let rngState = 1;
+  const session = new Session(fake, prompts, {
+    memory,
+    personalities,
+    defaultPersonality: "dry",
+    defaultShuffle: true,
+    rng: () => {
+      rngState = (rngState * 1664525 + 1013904223) >>> 0;
+      return rngState / 0x100000000;
+    },
+  });
+  const deps = {
+    session,
+    tts: new TtsBridge({ backend: "none" }),
+    stt: new SttBridge({}),
+    recorder: new Recorder(),
+    cleanup: () => rmSync(memDir, { recursive: true, force: true }),
+  };
+  const wss = startServer({ ...deps, port: 0 });
+  await waitListening(wss);
+  try {
+    const ws = await openClient(wss.address().port);
+    try {
+      const initial = await ws.next((m) => m.type === "modeSet");
+      assert.equal(initial.personality, "dry", "boot ack carries the seed");
+
+      // Run a trigger — shuffle rolls the runtime overlay to a different
+      // personality. The seed (and thus the next modeAck) must not change.
+      await session.handleTrigger("EXPLICIT_ASK", { active_file: "a.ts" });
+      assert.notEqual(
+        session.getPersonality(),
+        "dry",
+        "shuffle must have rolled the runtime overlay"
+      );
+      assert.equal(
+        session.getSeedPersonality(),
+        "dry",
+        "shuffle must NOT mutate the seed"
+      );
+
+      ws.send(JSON.stringify({ type: "getMode" }));
+      const ack = await ws.next((m) => m.type === "modeSet");
+      assert.equal(
+        ack.personality,
+        "dry",
+        "WS modeAck must surface the seed, never the per-trigger shuffle roll"
+      );
+    } finally {
+      ws.close();
+    }
+  } finally {
+    await closeServer(wss);
+    deps.cleanup();
+  }
+});
+
 test("9.8 (e) setMode / setPersonality acks also include shuffle (sidebar gets all dimensions in one frame)", async () => {
   const deps = buildDeps({ defaultShuffle: true });
   const wss = startServer({ ...deps, port: 0 });

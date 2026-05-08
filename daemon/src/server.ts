@@ -144,13 +144,17 @@ export function startServer(deps: ServerDeps): WebSocketServer & DemoToggle {
   // personality, shuffle) so the sidebar updates them in one round-trip
   // whether the user changed any of them or just connected. `reason`
   // rides along on rejections so the user sees *why* a switch failed.
+  // 16.16: the sidebar shows the *seed* personality (what the user
+  // configured / what's persisted), never the per-trigger shuffle roll.
+  // Otherwise the dropdown visibly hops every turn under shuffle mode
+  // even though the user's selection hasn't changed.
   const modeAck = (ok: boolean, reason?: string): string =>
     JSON.stringify({
       type: "modeSet",
       ok,
       mode: session.getMode(),
       available: session.listModes(),
-      personality: session.getPersonality(),
+      personality: session.getSeedPersonality(),
       availablePersonalities: session.listPersonalities(),
       shuffle: session.isShuffle(),
       ...(reason ? { reason } : {}),
