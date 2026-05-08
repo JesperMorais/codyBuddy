@@ -63,8 +63,10 @@ export const PRICING_USD_PER_MTOK: Record<
     cache_read: 0.3,
     cache_creation: 3.75,
   },
-  // Conservative fallback (Sonnet rates) so unknown models don't
-  // silently report $0 — better to over-estimate than under-estimate.
+  // Conservative fallback (Sonnet rates) so unknown *Anthropic* models
+  // don't silently report $0 — better to over-estimate than
+  // under-estimate when a hosted model id rolls over (e.g. a new
+  // claude-sonnet-X-X-YYYYMMDD pin lands before the table is updated).
   default: {
     input: 3.0,
     output: 15.0,
@@ -73,7 +75,19 @@ export const PRICING_USD_PER_MTOK: Record<
   },
 };
 
+/** Task 16.7(c): Ollama / OpenAI-compatible local model ids are
+ *  shaped `<name>:<tag>` (e.g. `qwen2.5-coder:32b`, `llama3.1:8b`).
+ *  These run on the user's hardware and have no per-token cost, so
+ *  pricing them at the Sonnet fallback shows fictional dollar amounts
+ *  to local users once turn telemetry is wired. The shape check is
+ *  conservative — Anthropic model ids never contain `:`. */
+function isLocalModel(model: string): boolean {
+  return model.includes(":");
+}
+
 export function estimateUsd(model: string, usage: UsageLike): number {
+  // Task 16.7(c): local models are free at the per-token level.
+  if (isLocalModel(model)) return 0;
   const rate = PRICING_USD_PER_MTOK[model] ?? PRICING_USD_PER_MTOK.default;
   return (
     ((usage.input_tokens ?? 0) * rate.input) / 1_000_000 +
