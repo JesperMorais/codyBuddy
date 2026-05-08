@@ -40,7 +40,16 @@ const DENY_PATTERNS = [
 ];
 
 const SECRET_REGEXES: RegExp[] = [
-  /\b(sk|sk-ant|sk-proj|sk-test|sk-live)-[A-Za-z0-9_-]{20,}\b/g,
+  // Issue #103: the prior single-line `(sk|sk-ant|sk-proj|sk-test|sk-live)-…{20,}`
+  // had two flaws — alternation is leftmost-first so every named branch was
+  // dead behind `sk`, and the 20-char `[A-Za-z0-9_-]+` tail over-redacted
+  // benign kebab-case identifiers (`sk-shadow-large-rounded-with-blue-tint`,
+  // `sk-deploy-staging-canary-2026-05-07`, etc.). Split into per-shape
+  // regexes that match real key formats more precisely. Mirror lives in
+  // extension/src/redactor.ts; keep these patterns identical.
+  /\bsk-ant-[A-Za-z0-9_-]{20,}\b/g,
+  /\bsk-(?:proj|admin|test|live)-[A-Za-z0-9_-]{20,}\b/g,
+  /\bsk-[A-Za-z0-9]{40,}\b/g,
   /\bAKIA[0-9A-Z]{16}\b/g,
   /\bASIA[0-9A-Z]{16}\b/g,
   /\bghp_[A-Za-z0-9]{36}\b/g,

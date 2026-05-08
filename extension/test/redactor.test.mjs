@@ -131,6 +131,72 @@ test("scrubSecrets leaves short look-alikes that don't match the patterns", () =
 });
 
 // --------------------------------------------------------------------------
+// Issue #103 — sk-* per-shape patterns
+// --------------------------------------------------------------------------
+
+test("issue #103 scrubSecrets does not redact benign kebab-case identifiers under sk-", () => {
+  // The pre-#103 regex was `(sk|sk-ant|sk-proj|sk-test|sk-live)-[A-Za-z0-9_-]{20,}`,
+  // which collapsed (leftmost-first) to `sk-[A-Za-z0-9_-]{20,}`. That over-redacted
+  // any 22+ char kebab-case identifier starting with `sk-`. The fix splits the
+  // single rule into per-shape regexes that won't match programmer identifiers.
+  const cases = [
+    "sk-shadow-large-rounded-with-blue-tint", // CSS class
+    "sk-deploy-staging-canary-2026-05-07",    // k8s deployment
+    "sk-this-is-a-perfectly-fine-class-name", // React component
+    "sk-feature-flag-onboarding-redesign-v2", // arbitrary identifier
+  ];
+  for (const input of cases) {
+    const result = scrubSecrets(input);
+    assert.equal(
+      result.text,
+      input,
+      `benign identifier '${input}' must not be redacted; got '${result.text}'`
+    );
+    assert.equal(result.hits, 0, `expected 0 hits for '${input}', got ${result.hits}`);
+  }
+});
+
+test("issue #103 scrubSecrets still redacts real Anthropic sk-ant-api03 keys", () => {
+  // Real Anthropic key shape: sk-ant-api03-{~95 b64-ish chars}.
+  const fakeAnthropic = "sk-ant-api03-" + "abc12_-".repeat(15) + "xyz";
+  const result = scrubSecrets(fakeAnthropic);
+  assert.ok(!result.text.includes("sk-ant-api03-"));
+  assert.equal(result.hits, 1);
+});
+
+test("issue #103 scrubSecrets still redacts real OpenAI legacy sk- keys (no internal hyphens)", () => {
+  // Real OpenAI legacy key shape: sk-{~48 alnum chars, no hyphens}.
+  const fakeOpenAi = "sk-" + "A".repeat(48);
+  const result = scrubSecrets(fakeOpenAi);
+  assert.ok(!result.text.includes("sk-AAA"));
+  assert.equal(result.hits, 1);
+});
+
+test("issue #103 scrubSecrets still redacts OpenAI project / admin keys", () => {
+  const projKey = "sk-proj-" + "ABCDEFGHIJKLMNOPQRSTUVWXYZ_-".repeat(2); // 56 chars after prefix
+  const adminKey = "sk-admin-" + "abcdefghij0123456789-_".repeat(2);     // 44 chars after prefix
+  const liveKey = "sk-live-" + "x".repeat(35);
+  const testKey = "sk-test-" + "y".repeat(35);
+  const all = `${projKey} ${adminKey} ${liveKey} ${testKey}`;
+  const result = scrubSecrets(all);
+  assert.ok(!result.text.includes("sk-proj-"));
+  assert.ok(!result.text.includes("sk-admin-"));
+  assert.ok(!result.text.includes("sk-live-"));
+  assert.ok(!result.text.includes("sk-test-"));
+  assert.equal(result.hits, 4);
+});
+
+test("issue #103 scrubSecrets does not let the pre-fix dead-branch bug reappear", () => {
+  // Regression guard. Before #103, `(sk|sk-ant|...)-[A-Za-z0-9_-]{20,}` matched
+  // the simplest `sk-anything-22-chars` tail. After the fix, that exact
+  // `sk-anything-with-dashes-here` shape must NOT match (no `sk-ant-` prefix,
+  // no `sk-proj/admin/test/live-` prefix, has internal dashes so the
+  // hyphen-free OpenAI-legacy pattern doesn't match).
+  const result = scrubSecrets("sk-something-with-internal-dashes-and-many-chars");
+  assert.equal(result.hits, 0);
+});
+
+// --------------------------------------------------------------------------
 // 16.6 — extended coverage (new SECRET_REGEXES + DENY_PATTERNS)
 // --------------------------------------------------------------------------
 
