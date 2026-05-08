@@ -219,13 +219,40 @@ export class TurnTelemetry {
 
   /** Read all turns from disk. Empty array when the file doesn't
    *  exist yet. Used by Phase 13's cost-cap watcher and the sidebar
-   *  $/hr counter. */
+   *  $/hr counter.
+   *
+   *  Per-line tolerance (issue #141): a single malformed line — caused
+   *  by a mid-write crash, a disk-full at a chunk boundary, manual
+   *  edits, or a future schema migration reading an older file — must
+   *  not nuke the entire read. DailyCostCap.safeRead and
+   *  RollingCostRate.snapshot wrap this call in try/catch and fall
+   *  back to an empty entries array on any throw, which silently
+   *  disables the cap and zeros the $/hr pill. We mirror
+   *  MemoryStore.loadRecent's posture: skip bad lines, keep the rest.
+   *  One log per call (capped to the first bad-line index) so
+   *  operators can find/repair the file without flooding stderr. */
   read(): TurnEntry[] {
     if (!existsSync(this.filePath)) return [];
-    return readFileSync(this.filePath, "utf8")
-      .split("\n")
-      .filter(Boolean)
-      .map((line) => JSON.parse(line) as TurnEntry);
+    const out: TurnEntry[] = [];
+    let firstBadIndex = -1;
+    let badCount = 0;
+    const lines = readFileSync(this.filePath, "utf8").split("\n");
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (!line) continue;
+      try {
+        out.push(JSON.parse(line) as TurnEntry);
+      } catch {
+        badCount += 1;
+        if (firstBadIndex < 0) firstBadIndex = i;
+      }
+    }
+    if (badCount > 0) {
+      console.error(
+        `[turn-telemetry] skipped ${badCount} malformed line(s) in ${this.filePath} (first at line ${firstBadIndex + 1})`
+      );
+    }
+    return out;
   }
 
   path(): string {
