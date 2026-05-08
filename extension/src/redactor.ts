@@ -36,7 +36,12 @@ const SECRET_REGEXES: RegExp[] = [
   /\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?):\/\/[^\s:/@]+:[^\s@]+@/gi,
   /\bglpat-[A-Za-z0-9_-]{20,}\b/g,
   /\bnpm_[A-Za-z0-9]{36}\b/g,
-  /\b[A-Z][A-Z0-9_]*(?:API|TOKEN|SECRET|PASSWORD|KEY)\s*=\s*['"]?[^\s'"]+/g,
+  // Issue #163: prefix is `*` (zero-or-more) so a bare `PASSWORD=`,
+  // `TOKEN=`, `SECRET=`, `KEY=`, `API=` is also caught — not just the
+  // qualified `DB_PASSWORD=` / `JWT_SECRET=` form. `\b` keeps it from
+  // firing mid-identifier (e.g. `myPASSWORD=` doesn't match because
+  // `y`→`P` is not a word boundary).
+  /\b[A-Z0-9_]*(?:API|TOKEN|SECRET|PASSWORD|KEY)\s*=\s*['"]?[^\s'"]+/g,
 ];
 
 export function isDeniedFile(path: string): boolean {

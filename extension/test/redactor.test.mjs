@@ -68,11 +68,17 @@ test("scrubSecrets returns input unchanged with hit count 0 when clean", () => {
 });
 
 test("scrubSecrets redacts sk-… style API keys", () => {
+  // Issue #163: with the relaxed SHOUTING_NAME=value rule (zero-or-more
+  // prefix), the bare `KEY="…"` form ALSO matches after the sk- rule
+  // has already redacted the inner value. That's safe — the secret is
+  // gone after the first pass, and the second hit just re-redacts the
+  // placeholder. Hits is therefore 2; the visible bytes "sk-ant-abc123"
+  // are still gone.
   const input = 'export const KEY = "sk-ant-abc123def456ghi789jkl012mno345pq";';
   const result = scrubSecrets(input);
   assert.match(result.text, /<REDACTED-SECRET>/);
   assert.equal(result.text.includes("sk-ant-abc123"), false);
-  assert.equal(result.hits, 1);
+  assert.equal(result.hits, 2);
 });
 
 test("scrubSecrets redacts AWS access keys (AKIA and ASIA prefixes)", () => {
@@ -230,6 +236,47 @@ test("16.6 scrubSecrets generic UPPER_CASE_KEY=value catches misc env-style secr
   assert.ok(!result.text.includes("plain-token-value"));
   assert.ok(!result.text.includes("topsecret"));
   assert.ok(!result.text.includes("hunter2"));
+});
+
+test("issue #163 scrubSecrets catches bare PASSWORD=/TOKEN=/SECRET=/KEY=/API= without a prefix", () => {
+  // Before #163, the SHOUTING_NAME=value rule used `[A-Z][A-Z0-9_]*`
+  // (one-or-more), so an unqualified `PASSWORD=hunter2` slipped through
+  // because no character preceded the suffix. The fix relaxes the
+  // prefix to `[A-Z0-9_]*` (zero-or-more); the leading `\b` keeps it
+  // anchored and prevents mid-identifier matches.
+  const cases = [
+    ["PASSWORD=hunter2", "hunter2"],
+    ["TOKEN=ghp_xxx", "ghp_xxx"],
+    ["SECRET=foo", "foo"],
+    ["API=bar", "bar"],
+    ["KEY=abc", "abc"],
+  ];
+  for (const [input, value] of cases) {
+    const result = scrubSecrets(input);
+    assert.ok(
+      !result.text.includes(value),
+      `bare suffix '${input}' should be redacted; got '${result.text}'`
+    );
+    assert.equal(result.hits, 1, `expected 1 hit for '${input}', got ${result.hits}`);
+  }
+});
+
+test("issue #163 scrubSecrets still matches the qualified PREFIX_SUFFIX=value form", () => {
+  // Regression guard: relaxing the prefix to `*` must not lose the
+  // existing 16.6 behaviour for qualified env-style names.
+  const result = scrubSecrets("DB_PASSWORD=baz API_TOKEN=qux MY_KEY=v");
+  assert.ok(!result.text.includes("baz"));
+  assert.ok(!result.text.includes("qux"));
+  assert.equal(result.hits, 3);
+});
+
+test("issue #163 scrubSecrets does not fire mid-identifier (lowercase prefix blocks the boundary)", () => {
+  // `\b` between two word characters is no boundary, so a lowercase
+  // prefix like `myPASSWORD=foo` must NOT match. This guards against
+  // a regression where a too-aggressive change drops `\b` entirely.
+  const result = scrubSecrets("myPASSWORD=foo");
+  assert.equal(result.hits, 0);
+  assert.equal(result.text, "myPASSWORD=foo");
 });
 
 test("16.6 scrubSecrets handles a .env-style fixture with one of each new pattern", () => {
