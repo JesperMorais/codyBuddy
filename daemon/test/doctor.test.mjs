@@ -35,11 +35,19 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(__dirname, "..", "..");
 const scriptPath = join(repoRoot, "scripts", "doctor.mjs");
 
+function cleanEnv(extra = {}) {
+  // Hermetic env: drop shell-supplied provider/key/url so tests
+  // exercise the .env-file path unless they explicitly opt in.
+  const { ANTHROPIC_API_KEY, BUDDY_PROVIDER, BUDDY_OLLAMA_URL, ...rest } =
+    process.env;
+  return { ...rest, NO_COLOR: "1", FORCE_COLOR: "0", ...extra };
+}
+
 function runDoctor(cwd) {
   // No --colour interpretation needed — we parse lines.
   const r = spawnSync(process.execPath, [scriptPath], {
     cwd,
-    env: { ...process.env, NO_COLOR: "1", FORCE_COLOR: "0" },
+    env: cleanEnv(),
     encoding: "utf8",
   });
   return {
@@ -81,13 +89,13 @@ function makeFakeRepo(opts = {}) {
   return dir;
 }
 
-function runIn(dir) {
+function runIn(dir, extraEnv = {}) {
   const r = spawnSync(
     process.execPath,
     [join(dir, "scripts", "doctor.mjs")],
     {
       cwd: dir,
-      env: { ...process.env, NO_COLOR: "1", FORCE_COLOR: "0" },
+      env: cleanEnv(extraEnv),
       encoding: "utf8",
     }
   );
@@ -164,7 +172,7 @@ ANTHROPIC_API_KEY=sk-ant-...
   try {
     const r = runIn(dir);
     assert.notEqual(r.status, 0);
-    assert.match(r.stdout, /\[XX\]\s+\.env ANTHROPIC_API_KEY/);
+    assert.match(r.stdout, /\[XX\]\s+ANTHROPIC_API_KEY/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -182,9 +190,77 @@ BUDDY_OLLAMA_URL=http://localhost:11434/v1
   try {
     const r = runIn(dir);
     assert.equal(r.status, 0);
-    assert.match(r.stdout, /\[OK\]\s+\.env BUDDY_OLLAMA_URL/);
+    assert.match(r.stdout, /\[OK\]\s+BUDDY_OLLAMA_URL/);
     // No red on missing anthropic key under provider=ollama.
-    assert.doesNotMatch(r.stdout, /\[XX\]\s+\.env ANTHROPIC_API_KEY/);
+    assert.doesNotMatch(r.stdout, /\[XX\]\s+ANTHROPIC_API_KEY/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("15.2 (h) shell-env ANTHROPIC_API_KEY satisfies the check even with placeholder .env (#121)", () => {
+  // Issue #121: doctor must accept a key sourced from process.env
+  // (direnv / 1Password CLI / CI secret) without forcing the user
+  // to also paste it into .env.
+  const fakeEnv = `BUDDY_PROVIDER=anthropic
+ANTHROPIC_API_KEY=sk-ant-...
+`;
+  const dir = makeFakeRepo({
+    envFile: fakeEnv,
+    daemonDist: true,
+    extensionOut: true,
+  });
+  try {
+    const realKey = `sk-ant-real-${"x".repeat(80)}`;
+    const r = runIn(dir, { ANTHROPIC_API_KEY: realKey });
+    assert.equal(
+      r.status,
+      0,
+      `expected exit 0 with shell-env key, got ${r.status}.\nstdout:\n${r.stdout}\nstderr:\n${r.stderr}`
+    );
+    assert.match(r.stdout, /\[OK\]\s+ANTHROPIC_API_KEY/);
+    assert.match(r.stdout, /set via shell env/);
+    assert.doesNotMatch(r.stdout, /\[XX\]\s+ANTHROPIC_API_KEY/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("15.2 (i) shell-env BUDDY_OLLAMA_URL is preferred over .env", () => {
+  // Mirror of (h) for the ollama provider's URL setting.
+  const fakeEnv = `BUDDY_PROVIDER=ollama
+BUDDY_OLLAMA_URL=http://localhost:11434/v1
+`;
+  const dir = makeFakeRepo({
+    envFile: fakeEnv,
+    daemonDist: true,
+    extensionOut: true,
+  });
+  try {
+    const r = runIn(dir, { BUDDY_OLLAMA_URL: "http://10.0.0.5:11434/v1" });
+    assert.equal(r.status, 0);
+    assert.match(r.stdout, /10\.0\.0\.5:11434/);
+    assert.match(r.stdout, /via shell env/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("15.2 (j) shell-env ANTHROPIC_API_KEY works with provider=anthropic and no key in .env", () => {
+  // Direnv/CI workflow: .env declares provider, key arrives via env.
+  const fakeEnv = `BUDDY_PROVIDER=anthropic
+`;
+  const dir = makeFakeRepo({
+    envFile: fakeEnv,
+    daemonDist: true,
+    extensionOut: true,
+  });
+  try {
+    const realKey = `sk-ant-${"y".repeat(80)}`;
+    const r = runIn(dir, { ANTHROPIC_API_KEY: realKey });
+    assert.equal(r.status, 0, `expected exit 0, got ${r.status}.\n${r.stdout}`);
+    assert.match(r.stdout, /\[OK\]\s+ANTHROPIC_API_KEY/);
+    assert.match(r.stdout, /set via shell env/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
