@@ -179,31 +179,61 @@ function checkEnvFile() {
     return;
   }
   const text = readFileSync(envPath, "utf8");
-  const provider = readEnvVar(text, "BUDDY_PROVIDER") ?? "anthropic";
-  // Provider key requirement
+  // Provider may come from either source; shell env wins when set.
+  const provider =
+    process.env.BUDDY_PROVIDER ||
+    readEnvVar(text, "BUDDY_PROVIDER") ||
+    "anthropic";
+  // Provider key requirement.
+  //
+  // Both `process.env` and `.env` are accepted: the daemon loads
+  // .env into process.env via dotenv at boot, then reads from
+  // process.env. Doctor must mirror that — a user who sources
+  // their key via direnv / 1Password CLI / a CI job secret should
+  // not see a misleading red just because .env has a placeholder
+  // (or no entry at all).
+  function placeholder(v) {
+    return !v || /^sk-ant-\.\.\.$/.test(v) || v.startsWith("sk-ant-...");
+  }
   if (provider === "anthropic") {
-    const key = readEnvVar(text, "ANTHROPIC_API_KEY") ?? "";
-    if (!key || /^sk-ant-\.\.\.$/.test(key) || key.startsWith("sk-ant-...")) {
+    const envKey = process.env.ANTHROPIC_API_KEY ?? "";
+    const fileKey = readEnvVar(text, "ANTHROPIC_API_KEY") ?? "";
+    // Prefer a non-placeholder shell value over .env, then a
+    // non-placeholder .env value over a placeholder shell value.
+    const effective = !placeholder(envKey)
+      ? envKey
+      : !placeholder(fileKey)
+        ? fileKey
+        : envKey || fileKey;
+    const source = effective === envKey && envKey ? "shell env" : ".env";
+    if (placeholder(effective)) {
       record(
-        ".env ANTHROPIC_API_KEY",
+        "ANTHROPIC_API_KEY",
         "red",
-        "missing or still the placeholder; replace with a real key"
+        "missing or still the placeholder (checked process.env and .env)"
       );
-    } else if (key.startsWith("sk-ant-")) {
-      record(".env ANTHROPIC_API_KEY", "green", `set (${key.length} chars)`);
+    } else if (effective.startsWith("sk-ant-")) {
+      record(
+        "ANTHROPIC_API_KEY",
+        "green",
+        `set via ${source} (${effective.length} chars)`
+      );
     } else {
       record(
-        ".env ANTHROPIC_API_KEY",
+        "ANTHROPIC_API_KEY",
         "yellow",
-        `unexpected prefix — usually starts with sk-ant-`
+        `set via ${source} but unexpected prefix — usually starts with sk-ant-`
       );
     }
   } else if (provider === "ollama") {
-    const url = readEnvVar(text, "BUDDY_OLLAMA_URL") ?? "";
-    if (!url) {
-      record(".env BUDDY_OLLAMA_URL", "yellow", "unset (defaults to localhost)");
+    const envUrl = process.env.BUDDY_OLLAMA_URL ?? "";
+    const fileUrl = readEnvVar(text, "BUDDY_OLLAMA_URL") ?? "";
+    const effective = envUrl || fileUrl;
+    if (!effective) {
+      record("BUDDY_OLLAMA_URL", "yellow", "unset (defaults to localhost)");
     } else {
-      record(".env BUDDY_OLLAMA_URL", "green", url);
+      const source = envUrl ? "shell env" : ".env";
+      record("BUDDY_OLLAMA_URL", "green", `${effective} (via ${source})`);
     }
   } else {
     record(
