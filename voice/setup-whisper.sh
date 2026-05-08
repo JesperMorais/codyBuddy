@@ -5,7 +5,7 @@
 # Or from voice/:        bash setup-whisper.sh
 #
 # whisper.cpp does not ship prebuilt binaries for Linux/macOS — only
-# Windows zips and an iOS xcframework — so we clone the v1.7.6 source
+# Windows zips and an iOS xcframework — so we clone the v1.8.4 source
 # and build with cmake. Requires git, cmake, and a C/C++ toolchain
 # (gcc/clang+make) on PATH.
 
@@ -15,7 +15,7 @@ here="$(cd "$(dirname "$0")" && pwd)"
 w_dir="$here/whisper"
 src_dir="$w_dir/src"
 model_dir="$w_dir/models"
-whisper_tag="v1.7.6"
+whisper_tag="v1.8.4"
 
 mkdir -p "$w_dir" "$model_dir"
 

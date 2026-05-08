@@ -10,8 +10,8 @@ $modelDir = Join-Path $wDir "models"
 
 New-Item -ItemType Directory -Force -Path $wDir, $modelDir | Out-Null
 
-# Pin a known-good release. v1.7.6 ships whisper-cli.exe + DLLs.
-$zipUrl = "https://github.com/ggml-org/whisper.cpp/releases/download/v1.7.6/whisper-bin-x64.zip"
+# Pin a known-good release. v1.8.4 ships whisper-cli.exe + DLLs.
+$zipUrl = "https://github.com/ggml-org/whisper.cpp/releases/download/v1.8.4/whisper-bin-x64.zip"
 $zipPath = Join-Path $here "whisper-bin-x64.zip"
 
 $exeCandidates = @("whisper-cli.exe")

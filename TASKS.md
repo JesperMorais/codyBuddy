@@ -215,10 +215,10 @@ A four-auditor + two-challenger pass found real defects across the code shipped 
 
 - [ ] **16.13** `WakeWordGate.findPhrase` is substring, not whole-word. `daemon/src/wake-word.ts:147-150` uses `String.indexOf` on lowercased haystack. Wake word `"buddy"` triggers on `"buddybuilds"`, `"my buddyship is great"`. Header at line 142 calls this "whole-word match" but the implementation isn't. Use `\b<phrase>\b` regex or a manual word-boundary check. Test: the existing 11.k case for `"buddy"` and a new case `"buddybuilds"` must NOT trigger.
 
-- [ ] **16.14** Stale per-OS voice setup tooling.
+- [x] **16.14** Stale per-OS voice setup tooling.
   - `voice/setup-piper.ps1:14` pins piper `2023.11.14-2` (~2.5 years old).
   - `voice/setup-whisper.ps1:14` pins whisper.cpp `v1.7.6` (similar age).
-  - No mac/Linux equivalents (`setup-piper.sh`, `setup-whisper.sh`); README claims "fresh checkout on Windows 11, macOS, or Linux" but voice extras are Windows-only. Either ship the missing scripts or move both backends to manifest-driven downloads via 16.3.
+  - No mac/Linux equivalents (`setup-piper.sh`, `setup-whisper.sh`); README claims "fresh checkout on Windows 11, macOS, or Linux" but voice extras are Windows-only. Either ship the missing scripts or move both backends to manifest-driven downloads via 16.3. (see #154)
 
 - [ ] **16.15** `TieredRouter.editor-context` fingerprint advances on aborted streams. `daemon/src/tiered-router.ts` calls `updateFingerprint()` in a `finally`, which runs even when the inner generator throws or is aborted by barge-in. The next turn (with the *same* context the user never got an answer to) won't re-escalate on (b). Move the fingerprint update inside the success branch so an aborted turn still triggers (b) on retry. Test: a stub stream that throws between yields — assert next-turn route still escalates on context change.
 

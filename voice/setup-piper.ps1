@@ -11,6 +11,9 @@ $voicesDir = Join-Path $here "voices"
 
 New-Item -ItemType Directory -Force -Path $piperDir, $voicesDir | Out-Null
 
+# Pin: 2023.11.14-2 is the latest rhasspy/piper release on GitHub
+# (the upstream binary distribution has been dormant since then).
+# If a newer release appears, also bump setup-piper.sh.
 $piperZipUrl = "https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_windows_amd64.zip"
 $piperZip = Join-Path $here "piper_windows_amd64.zip"
 
