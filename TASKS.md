@@ -231,7 +231,7 @@ A four-auditor + two-challenger pass found real defects across the code shipped 
 - [ ] **16.18** No CI smoke for the voice path. `.github/workflows/ci.yml:55-62` runs `setup.{ps1,sh} --skip-voice` on all three OSes — the voice extras (Piper/Whisper/Kokoro/Silero/openWakeWord) are never exercised in CI. Once 16.3 lands real downloads, add a job (gated by a manual workflow_dispatch input or a label, since model downloads are big) that validates the voice path on `windows-latest` at minimum.
 
 - [ ] **16.19** Misc cleanup, bundle as one PR:
-  - `daemon/src/vad-bridge.ts:142-144` doesn't surface socket errors to caller — only logs. Add `errorHandlers` for transient socket errors so a host can backoff/alert.
+  - ~~`daemon/src/vad-bridge.ts:142-144` doesn't surface socket errors to caller — only logs. Add `errorHandlers` for transient socket errors so a host can backoff/alert.~~ (see #171)
   - `daemon/src/voice-sidecar.ts:74-77` doesn't auto-restart on uvicorn crash — only logs the exit. Add an opt-in restart-with-backoff.
   - `daemon/src/tiered-router.ts:194` fingerprint embeds the full diff text. Use a hash for diffs over a few KB.
   - `daemon/src/turn-telemetry.ts:209-215` re-parses the entire `turns.jsonl` on every `RollingCostRate` poll. Cap the read window or stream-tail the file.

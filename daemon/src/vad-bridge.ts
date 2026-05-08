@@ -37,6 +37,7 @@ export interface VadBridgeOptions {
 
 type SpeechHandler = (ts: number) => void;
 type ErrorHandler = (reason: string) => void;
+type SocketErrorHandler = (reason: string) => void;
 
 /**
  * Daemon-side client for the voice sidecar's /vad WebSocket. Handles
@@ -66,6 +67,7 @@ export class VadBridge {
   private speechStartHandlers: SpeechHandler[] = [];
   private speechEndHandlers: SpeechHandler[] = [];
   private errorHandlers: ErrorHandler[] = [];
+  private socketErrorHandlers: SocketErrorHandler[] = [];
   private pendingFrames: Buffer[] = [];
   /** When the upstream told us silero-vad is missing, stop reconnecting. */
   private permanentlyDown = false;
@@ -89,6 +91,16 @@ export class VadBridge {
    *  not transient. */
   onError(h: ErrorHandler): void {
     this.errorHandlers.push(h);
+  }
+
+  /** Fired on transient WebSocket-level errors (ECONNREFUSED, transport
+   *  failures, abrupt drops). The bridge keeps reconnecting per
+   *  `reconnectMs`; this handler lets a host surface the failure
+   *  (status pill, alert, custom backoff) instead of only seeing it in
+   *  the log. Distinct from `onError`, which fires for upstream
+   *  protocol errors that latch permanentlyDown. */
+  onSocketError(h: SocketErrorHandler): void {
+    this.socketErrorHandlers.push(h);
   }
 
   isOpen(): boolean {
@@ -115,7 +127,9 @@ export class VadBridge {
     try {
       socket = new WebSocket(this.url);
     } catch (err) {
-      this.log(`[vad-bridge] connect failed: ${err}`);
+      const reason = err instanceof Error ? err.message : String(err);
+      this.log(`[vad-bridge] connect failed: ${reason}`);
+      for (const h of this.socketErrorHandlers) h(reason);
       this.scheduleReconnect();
       return;
     }
@@ -141,6 +155,7 @@ export class VadBridge {
 
     socket.on("error", (err) => {
       this.log(`[vad-bridge] socket error: ${err.message}`);
+      for (const h of this.socketErrorHandlers) h(err.message);
     });
 
     socket.on("close", () => {

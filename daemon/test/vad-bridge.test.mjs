@@ -175,6 +175,34 @@ test("10.1 (e) reset() clears the permanently-down latch so a future connect ret
   }
 });
 
+test("16.19 (a) onSocketError fires on transient socket failures without latching permanentlyDown", async () => {
+  // Connect to a port nobody is listening on — the OS replies ECONNREFUSED
+  // and the WS surfaces a socket "error" event. The bridge should:
+  //   - log the error (existing behavior)
+  //   - notify socketErrorHandlers (new)
+  //   - keep reconnecting (transient — NOT permanentlyDown)
+  // Pick a port range above the ephemeral pool that's almost certainly free.
+  const deadPort = 1; // privileged + nothing listening → connect refused
+  const reasons = [];
+  const protocolErrors = [];
+  const bridge = new VadBridge({
+    url: `ws://127.0.0.1:${deadPort}/vad`,
+    log: () => {},
+    reconnectMs: 50,
+  });
+  bridge.onSocketError((reason) => reasons.push(reason));
+  bridge.onError((reason) => protocolErrors.push(reason));
+  bridge.connect();
+  try {
+    await wait(200);
+    assert.ok(reasons.length >= 1, `expected ≥1 socket-error notification, got ${reasons.length}`);
+    assert.equal(protocolErrors.length, 0, "transport errors must NOT fire onError (protocol-fatal handler)");
+    assert.equal(bridge.isPermanentlyDown(), false, "transient socket errors must NOT latch permanentlyDown");
+  } finally {
+    bridge.dispose();
+  }
+});
+
 test("10.1 (f) bad JSON from the upstream is logged but does not crash the bridge", async () => {
   const wss = makeServer((ws) => {
     ws.send("not json {{{");
