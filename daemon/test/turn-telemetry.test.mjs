@@ -8,7 +8,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, existsSync } from "node:fs";
+import { mkdtempSync, readFileSync, existsSync, writeFileSync, appendFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -308,6 +308,54 @@ test("11.5 disk-write failure does not throw (matches Telemetry contract)", () =
       mode: "tutor",
     })
   );
+});
+
+// Issue #141: a single malformed JSONL line must not nuke the whole
+// read — DailyCostCap.safeRead falls back to [] on any throw, which
+// silently disables the cap. Per-line tolerance (mirroring
+// MemoryStore.loadRecent) keeps the cap working on the surviving
+// lines.
+test("#141 read() skips malformed lines instead of throwing", () => {
+  const path = tempPath();
+  const tel = new TurnTelemetry(path);
+
+  // Write one good entry, then a corrupt line, then another good
+  // entry — simulating a mid-write crash between two clean records.
+  const good1 = tel.record({
+    haikuModel: "claude-haiku-4-5-20251001",
+    haikuUsage: { input_tokens: 10, output_tokens: 2 },
+    routerReason: "no_escalation",
+    endToEndMs: 100,
+    wakeWord: "off",
+    personality: "nice",
+    mode: "tutor",
+  });
+  appendFileSync(path, "this is not json\n", "utf8");
+  const good2 = tel.record({
+    sonnetModel: "claude-sonnet-4-6",
+    sonnetUsage: { input_tokens: 500, output_tokens: 50 },
+    routerReason: "trigger=EXPLICIT_ASK",
+    endToEndMs: 800,
+    wakeWord: "off",
+    personality: "nice",
+    mode: "reviewer",
+  });
+
+  // Must not throw, must return the two good entries in order.
+  const entries = tel.read();
+  assert.equal(entries.length, 2);
+  assert.deepEqual(entries[0], good1);
+  assert.deepEqual(entries[1], good2);
+});
+
+test("#141 read() of an entirely corrupt file returns [] without throwing", () => {
+  const path = tempPath();
+  // No good lines at all — pre-existing turns.jsonl from a future
+  // schema migration, or a fully truncated file.
+  writeFileSync(path, "garbage\n{not really json\n[]not-json\n", "utf8");
+  const tel = new TurnTelemetry(path);
+  assert.doesNotThrow(() => tel.read());
+  assert.deepEqual(tel.read(), []);
 });
 
 test("11.5 lives under ~/.coding-buddy/ by default", async () => {
