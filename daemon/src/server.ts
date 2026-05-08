@@ -116,6 +116,14 @@ export function startServer(deps: ServerDeps): WebSocketServer & DemoToggle {
   const wss = new WebSocketServer({
     host: "127.0.0.1",
     port,
+    // Cap incoming WS messages at 8 MiB (#95). The ws library default
+    // is 100 MiB, which lets any local client RAM-bomb the daemon by
+    // shipping a giant base64 audio payload to the `transcribe`
+    // handler. 8 MiB covers ~5min of 16kHz mono PCM as base64 — well
+    // above any legit push-to-talk turn — and outsized messages get
+    // rejected at the wire boundary (close code 1009, "message too
+    // big") before JSON.parse runs.
+    maxPayload: 8 * 1024 * 1024,
     verifyClient: ({ origin }, cb) => {
       if (origin) {
         console.warn(`[buddy-daemon] rejecting WS connect with Origin=${origin}`);

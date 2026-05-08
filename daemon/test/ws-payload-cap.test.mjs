@@ -89,27 +89,34 @@ test("WS rejects messages larger than maxPayload (close code 1009)", async () =>
       requestId: "oversized",
       audio: bigPayload,
     });
-    const closed = new Promise((resolve) => {
-      ws.once("close", (code) => resolve(code));
+    // Resolve on whichever of `close` or `error` fires first. Windows
+    // can surface the maxPayload rejection as an `error` event that
+    // precedes (or replaces) `close`, so listening on `close` alone
+    // hangs the test until the deadline.
+    const rejected = new Promise((resolve) => {
+      ws.once("close", (code) => resolve({ kind: "close", code }));
+      ws.once("error", () => resolve({ kind: "error" }));
     });
     ws.send(oversized);
-    // Explicit deadline: without maxPayload set, pre-fix the server
-    // accepts 9 MiB and processes it as a normal transcribe request;
-    // no `close` ever fires and the test would hang the runner. With
-    // the deadline, the regression surfaces as a clean assertion.
-    const deadline = new Promise((resolve) => setTimeout(() => resolve("timeout"), 5000));
-    const result = await Promise.race([closed, deadline]);
+    // Without maxPayload set, pre-fix the server accepts 9 MiB and
+    // processes it as a normal transcribe request — neither `close`
+    // nor `error` ever fires and the test would hang. The deadline
+    // turns the regression into a clean assertion. 15s is generous
+    // for Windows runner scheduling jitter on close-frame delivery.
+    const deadline = new Promise((resolve) => setTimeout(() => resolve("timeout"), 15000));
+    const result = await Promise.race([rejected, deadline]);
     assert.notEqual(
       result, "timeout",
       "WS server accepted a 9 MiB message — maxPayload cap missing or set too high"
     );
-    // ws library spec: 1009 = "message too big". Some platforms close
-    // with 1006 ("abnormal closure") if the underlying socket is
-    // torn first. Accept either as evidence that the WS layer
-    // rejected the frame instead of buffering 9 MiB into JSON.parse.
+    // ws library spec: 1009 = "message too big". 1006 = "abnormal
+    // closure" when the underlying socket is torn first. An `error`
+    // event (Windows path) is also valid evidence the WS layer
+    // rejected the frame rather than buffering 9 MiB into JSON.parse.
     assert.ok(
-      result === 1009 || result === 1006,
-      `expected close code 1009 or 1006, got ${result}`
+      result.kind === "error" ||
+        (result.kind === "close" && (result.code === 1009 || result.code === 1006)),
+      `expected error or close code 1009/1006, got ${JSON.stringify(result)}`
     );
   } finally {
     try { ws?.close(); } catch {}
