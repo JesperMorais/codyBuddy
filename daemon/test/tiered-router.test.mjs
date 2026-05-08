@@ -225,6 +225,46 @@ test("11.4 AbortSignal threads through to Sonnet on escalation", async () => {
   assert.equal(sonnetCalls[0].signal, ac.signal, "signal must be passed through unchanged");
 });
 
+test("16.19 (b) very large recent_diff: identical across turns does NOT escalate", async () => {
+  // Regression: fingerprint hashes long diffs to bound memory. The
+  // hash branch must still treat byte-identical diffs as equal so a
+  // long-running edit session that holds the same diff string between
+  // turns doesn't pay the (b) escalation tax on every turn.
+  const { haiku, sonnet, sonnetCalls } = makeStubs({
+    haikuVerdict: { escalate: false, text: "ok" },
+  });
+  const router = new TieredRouter({ haiku, sonnet });
+
+  const bigDiff = "x".repeat(10_000); // > 4 KiB threshold
+  const ctx = { active_file: "a.ts", recent_diff: bigDiff };
+  await collect(router.route(["sys"], { ...ctx }));
+  await collect(router.route(["sys"], { ...ctx }));
+  await collect(router.route(["sys"], { ...ctx }));
+
+  assert.equal(sonnetCalls.length, 0, "identical hashed diff across turns: never escalate");
+});
+
+test("16.19 (b) very large recent_diff: a single-byte change still flips the fingerprint", async () => {
+  // The whole point of the hash branch: a tiny tweak inside a 50KB
+  // diff must still flip the digest and trigger (b). A naive bound
+  // (e.g. truncate-to-first-N-bytes) would lose this property.
+  const { haiku, sonnet, sonnetCalls } = makeStubs({
+    haikuVerdict: { escalate: false, text: "ok" },
+  });
+  const router = new TieredRouter({ haiku, sonnet });
+
+  const base = "x".repeat(50_000);
+  await collect(router.route(["sys"], { active_file: "a.ts", recent_diff: base }));
+  assert.equal(sonnetCalls.length, 0, "first turn must not escalate on (b)");
+
+  // Flip exactly one byte, well past the truncation point a naive
+  // implementation would use.
+  const tweaked = base.slice(0, 30_000) + "y" + base.slice(30_001);
+  await collect(router.route(["sys"], { active_file: "a.ts", recent_diff: tweaked }));
+  assert.equal(sonnetCalls.length, 1, "single-byte change inside a long diff must escalate");
+  assert.equal(router.getLastOutcome()?.reason, "editor_context_changed");
+});
+
 test("11.4 router state survives across multiple turns without leak", async () => {
   // Mixed history: turn 1 haiku, turn 2 sonnet (trigger), turn 3 haiku.
   // Each turn's outcome should reflect the routing for THAT turn,
