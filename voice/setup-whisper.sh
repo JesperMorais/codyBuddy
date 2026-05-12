@@ -82,15 +82,42 @@ fi
 model_path="$model_dir/ggml-base.en.bin"
 if [ ! -f "$model_path" ]; then
     echo "Downloading ggml-base.en.bin model (~150MB)…"
-    model_url="https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin?download=true"
+    base_url="https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin"
+    model_url="${base_url}?download=true"
+    manifest_url="${base_url}.sha256"
+    manifest_tmp="$(mktemp)"
     if command -v curl >/dev/null 2>&1; then
         curl -fL --retry 3 -o "$model_path" "$model_url"
+        curl -fL --retry 3 -o "$manifest_tmp" "$manifest_url"
     elif command -v wget >/dev/null 2>&1; then
         wget -O "$model_path" "$model_url"
+        wget -O "$manifest_tmp" "$manifest_url"
     else
         echo "ERROR: need curl or wget to download the model." >&2
         exit 1
     fi
+    if [ ! -s "$manifest_tmp" ]; then
+        echo "ERROR: failed to download manifest file from $manifest_url" >&2
+        rm -f "$model_path" "$manifest_tmp"
+        exit 1
+    fi
+    expected_hash="$(cut -d' ' -f1 < "$manifest_tmp")"
+    if command -v sha256sum >/dev/null 2>&1; then
+        actual_hash="$(sha256sum "$model_path" | cut -d' ' -f1)"
+    elif command -v shasum >/dev/null 2>&1; then
+        actual_hash="$(shasum -a 256 "$model_path" | cut -d' ' -f1)"
+    else
+        echo "ERROR: no sha256sum or shasum command available" >&2
+        rm -f "$model_path" "$manifest_tmp"
+        exit 1
+    fi
+    rm -f "$manifest_tmp"
+    if [ "$actual_hash" != "$expected_hash" ]; then
+        echo "ERROR: model file integrity check failed (expected $expected_hash, got $actual_hash)" >&2
+        rm -f "$model_path"
+        exit 1
+    fi
+    echo "Integrity verification passed."
 else
     echo "Model already present."
 fi
