@@ -17,20 +17,23 @@
 #   --skip-voice    skip voice/.venv + Python deps (chat-only path)
 #   --skip-pnpm     skip `pnpm install`
 #   --quiet         suppress info-level output
+#   --no-doctor     skip the final `pnpm doctor` verification handoff
 
 set -euo pipefail
 
 SKIP_VOICE=0
 SKIP_PNPM=0
 QUIET=0
+RUN_DOCTOR=1
 
 for arg in "$@"; do
     case "$arg" in
         --skip-voice) SKIP_VOICE=1 ;;
         --skip-pnpm)  SKIP_PNPM=1 ;;
         --quiet)      QUIET=1 ;;
+        --no-doctor)  RUN_DOCTOR=0 ;;
         -h|--help)
-            sed -n '2,19p' "$0"
+            sed -n '2,20p' "$0"
             exit 0
             ;;
         *)
@@ -75,7 +78,12 @@ missing=()
 node_major=""
 if have node; then
     raw="$(node --version 2>/dev/null || true)"
-    node_major="$(echo "$raw" | sed -E 's/^v([0-9]+)\..*/\1/')"
+    # -n + p so a non-match yields empty (caught by the -z guard below)
+    # rather than echoing the raw string unchanged — an exotic version
+    # like `v22-nightly` would otherwise survive and crash the numeric
+    # `[ ... -lt 20 ]` test under set -e. Dropping the `\.` also lets a
+    # dotless `v22` match and return `22`.
+    node_major="$(echo "$raw" | sed -nE 's/^v([0-9]+).*/\1/p')"
 fi
 if [ -z "$node_major" ]; then
     err "Node.js not found on PATH."
@@ -168,7 +176,11 @@ fi
 
 if [ "$SKIP_PNPM" = "0" ]; then
     info "Running pnpm install…"
-    pnpm install
+    # --frozen-lockfile matches CI (.github/workflows/ci.yml); a bare
+    # `pnpm install` would silently rewrite a drifted lockfile locally
+    # while CI rejects it. Contributors who genuinely need to update the
+    # lockfile can run `pnpm install` directly.
+    pnpm install --frozen-lockfile
 else
     info "pnpm install skipped (--skip-pnpm)"
 fi
@@ -236,6 +248,26 @@ if [ ! -f "$ENV_FILE" ]; then
     fi
 else
     info ".env already exists ✓"
+fi
+
+# Fail-fast hint: a user who forgets to edit .env otherwise only finds
+# out at their first daemon request. doctor reds this too (the gate
+# before `pnpm dev`); the setup-time warn is the earlier signal.
+if [ -f "$ENV_FILE" ] && grep -q '^ANTHROPIC_API_KEY=sk-ant-\.\.\.$' "$ENV_FILE"; then
+    warn "ANTHROPIC_API_KEY in .env is still the placeholder — fill it in before running pnpm dev."
+fi
+
+# ---- Verification handoff --------------------------------------
+#
+# Run `pnpm doctor` so the user gets a green/red checklist instead of a
+# bare "Setup complete" and only discovering problems at first use. On a
+# fresh install doctor will flag the not-yet-filled key and the unbuilt
+# daemon — that's the point: it tells the user exactly what's left.
+# Advisory: doctor's exit code never fails setup (|| warn). Skip with
+# --no-doctor (CI passes this for parity + faster reruns).
+if [ "$RUN_DOCTOR" = "1" ] && have node; then
+    info "Running pnpm doctor for verification…"
+    pnpm doctor || warn "doctor reported issues — see above; fix the red lines before pnpm dev."
 fi
 
 # ---- Final message --------------------------------------------
