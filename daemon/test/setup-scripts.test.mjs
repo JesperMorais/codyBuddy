@@ -148,3 +148,26 @@ test("15.1 (i) both scripts gracefully skip model download when manifest absent"
     );
   }
 });
+
+test("#88 setup.sh soft-checks the ALSA/PortAudio runtime on Linux", () => {
+  // The sounddevice wheel bundles PortAudio so `pip install` succeeds
+  // without system ALSA; the failure only surfaces at runtime. setup.sh
+  // should warn at install time instead. Linux-only (macOS=CoreAudio,
+  // Windows=WASAPI need no check), and advisory — it must never add to
+  // the hard-fail `missing` set.
+  const src = readFileSync(shPath, "utf8");
+  assert.match(src, /libasound/, "missing ALSA/libasound probe");
+  assert.match(src, /uname -s/, "ALSA probe should be gated on the OS (uname)");
+  assert.match(
+    src,
+    /libasound2|libportaudio2/,
+    "missing Debian/Ubuntu install hint"
+  );
+  assert.match(src, /alsa-lib|portaudio/, "missing Fedora/RHEL install hint");
+  // Advisory only: the probe block uses warn(), not missing+=().
+  const probe = src.slice(src.indexOf("audio runtime (Linux only)"));
+  assert.ok(
+    !/missing\+=/.test(probe.slice(0, probe.indexOf("Workspace install"))),
+    "ALSA probe must stay advisory (no missing+= in the probe block)"
+  );
+});

@@ -128,6 +128,41 @@ if [ "${#missing[@]}" -gt 0 ]; then
     exit 1
 fi
 
+# ---- Soft prereq: audio runtime (Linux only) --------------------
+#
+# The `sounddevice` wheel bundles PortAudio, so `pip install` succeeds
+# even on a host with no system ALSA — but the voice sidecar then
+# fails at runtime with an opaque `PortAudioError` the moment it opens
+# an output device. Warn now, at install time, rather than leaving the
+# user to debug it later from inside VS Code. Advisory only: never
+# blocks setup, and skipped on the chat-only (--skip-voice) path.
+# macOS is fine (CoreAudio is always present); Windows uses WASAPI via
+# the bundled PortAudio — neither needs the check.
+if [ "$SKIP_VOICE" = "0" ] && [ "$(uname -s)" = "Linux" ]; then
+    ldc=""
+    if have ldconfig; then
+        ldc="ldconfig"
+    elif [ -x /sbin/ldconfig ]; then
+        ldc="/sbin/ldconfig"
+    elif [ -x /usr/sbin/ldconfig ]; then
+        ldc="/usr/sbin/ldconfig"
+    fi
+    if [ -n "$ldc" ]; then
+        if "$ldc" -p 2>/dev/null | grep -q 'libasound\.so'; then
+            info "audio runtime: libasound ✓"
+        else
+            warn "ALSA runtime (libasound) not found — the voice sidecar may fail at runtime with a PortAudioError."
+            info "  Debian/Ubuntu: sudo apt-get install -y libasound2 libportaudio2"
+            info "  Fedora/RHEL:   sudo dnf install -y alsa-lib portaudio"
+        fi
+    else
+        # Can't probe (no ldconfig) — hint rather than warn, to avoid a
+        # false positive on hosts where libasound is present but the
+        # linker cache tool isn't on PATH.
+        info "Skipping ALSA probe (ldconfig not found); if the voice sidecar can't open an audio device, install libasound2/libportaudio2."
+    fi
+fi
+
 # ---- Workspace install ------------------------------------------
 
 if [ "$SKIP_PNPM" = "0" ]; then
