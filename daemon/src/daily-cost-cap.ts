@@ -14,13 +14,9 @@
 // scans. Wiring (calling setSuspended on bridge / loop) is the
 // host's job — keeps this module trivially testable.
 
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
+import { ensureSecureDir, writeFileSecure } from "./secure-store.js";
 import type { TurnEntry, TurnTelemetry } from "./turn-telemetry.js";
 
 export interface DailyCostCapOptions {
@@ -134,7 +130,7 @@ export interface PersistedCapState {
  *  must not crash on a bookkeeping write failure. */
 export function persistCapState(path: string, status: CapStatus): void {
   try {
-    mkdirSync(dirname(path), { recursive: true });
+    ensureSecureDir(dirname(path));
     const payload: PersistedCapState = {
       date: status.forDate,
       hit: status.hit,
@@ -142,7 +138,7 @@ export function persistCapState(path: string, status: CapStatus): void {
       cap_usd: status.capUsd,
       computed_at: status.computedAt,
     };
-    writeFileSync(path, JSON.stringify(payload) + "\n");
+    writeFileSecure(path, JSON.stringify(payload) + "\n");
   } catch (err) {
     console.error("[daily-cap] persist failed:", err);
   }

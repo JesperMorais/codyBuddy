@@ -28,8 +28,6 @@
 // list prices.
 
 import {
-  mkdirSync,
-  appendFileSync,
   existsSync,
   readFileSync,
   statSync,
@@ -39,6 +37,7 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
+import { ensureSecureDir, appendFileSecure } from "./secure-store.js";
 import type { UsageLike } from "./telemetry.js";
 
 export const DEFAULT_TURN_TELEMETRY_PATH = join(
@@ -170,7 +169,7 @@ export interface TurnEntry {
 export class TurnTelemetry {
   constructor(private filePath: string = DEFAULT_TURN_TELEMETRY_PATH) {
     try {
-      mkdirSync(dirname(this.filePath), { recursive: true });
+      ensureSecureDir(dirname(this.filePath));
     } catch {
       // Same posture as Telemetry: never fatal here. Append will
       // surface the real error per-call.
@@ -219,7 +218,7 @@ export class TurnTelemetry {
     };
 
     try {
-      appendFileSync(this.filePath, JSON.stringify(entry) + "\n", "utf8");
+      appendFileSecure(this.filePath, JSON.stringify(entry) + "\n");
     } catch (err) {
       console.error("[turn-telemetry] write failed:", err);
     }
