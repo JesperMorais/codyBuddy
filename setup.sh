@@ -3,8 +3,9 @@
 #
 # Verifies prerequisites (Node ≥20, pnpm, Python ≥3.11), bootstraps
 # the workspace, creates voice/.venv, installs voice dependencies,
-# downloads pinned models (skipped until Task 15.10 ships
-# voice/models.json), and copies .env.example → .env if missing.
+# downloads the pinned models listed in voice/models.json (skip with
+# --skip-voice or BUDDY_SETUP_SKIP_MODELS=1), and copies
+# .env.example → .env if missing.
 #
 # Idempotent — safe to re-run after partial failure or whenever
 # you bump dependencies.
@@ -29,7 +30,7 @@ for arg in "$@"; do
         --skip-pnpm)  SKIP_PNPM=1 ;;
         --quiet)      QUIET=1 ;;
         -h|--help)
-            sed -n '2,18p' "$0"
+            sed -n '2,19p' "$0"
             exit 0
             ;;
         *)
