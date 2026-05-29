@@ -23,7 +23,7 @@ export class SttBridge {
 
   async transcribe(wavBytes: Buffer): Promise<string> {
     if (!this.isAvailable()) {
-      throw new Error("Whisper not configured. Run voice/setup-whisper.ps1 and set BUDDY_WHISPER_EXE / BUDDY_WHISPER_MODEL.");
+      throw new Error("Whisper not configured. Run voice/setup-whisper.sh (Linux/macOS) or voice/setup-whisper.ps1 (Windows), then set BUDDY_WHISPER_EXE / BUDDY_WHISPER_MODEL.");
     }
     const dir = mkdtempSync(join(tmpdir(), "buddy-stt-"));
     const wav = join(dir, "in.wav");
