@@ -350,8 +350,8 @@ export class BuddySidebarProvider implements vscode.WebviewViewProvider {
   #demo-banner[data-active="true"] { display: block; }
 </style></head>
 <body>
-  <div id="demo-banner" data-active="false">demo mode &mdash; replies are canned, not from Claude.</div>
-  <div id="buddy-state" data-state="idle">Ready</div>
+  <div id="demo-banner" role="alert" aria-live="assertive" data-active="false">demo mode &mdash; replies are canned, not from Claude.</div>
+  <div id="buddy-state" role="status" aria-live="polite" data-state="idle" tabindex="0">Ready</div>
   <div id="controls">
     <label for="mode-select">Mode</label>
     <select id="mode-select"></select>
@@ -359,10 +359,10 @@ export class BuddySidebarProvider implements vscode.WebviewViewProvider {
     <select id="personality-select"></select>
     <label class="shuffle-row" for="shuffle"><input type="checkbox" id="shuffle"> Shuffle</label>
   </div>
-  <div id="log"></div>
+  <div id="log" role="log" aria-live="polite" aria-relevant="additions"></div>
   <div id="ask-row">
     <input id="ask" placeholder="Ask the buddy (Enter to send)..." />
-    <button id="mic" title="Click or press Ctrl+Alt+V to record">🎤</button>
+    <button id="mic" aria-label="Start recording (Ctrl+Alt+V)" title="Click or press Ctrl+Alt+V to record">🎤</button>
   </div>
   <div id="voice-status">voice: ?</div>
 <script>
@@ -469,9 +469,9 @@ export class BuddySidebarProvider implements vscode.WebviewViewProvider {
   function setBuddyState(state, label) {
     if (!buddyStatePill) return;
     buddyStatePill.dataset.state = state;
-    // The textContent IS the label — keeps the pill accessible
-    // (NVDA/JAWS read it on focus) without an extra aria-live
-    // dance. The colour swatch is decorative.
+    // The pill is a role="status" aria-live="polite" region (see the
+    // markup), so writing textContent announces the new state to
+    // screen readers. The colour swatch is decorative.
     buddyStatePill.textContent = label || state;
   }
 
@@ -491,9 +491,11 @@ export class BuddySidebarProvider implements vscode.WebviewViewProvider {
     if (on) {
       mic.classList.add('recording');
       mic.textContent = '⏺';
+      mic.setAttribute('aria-label', 'Stop recording (Ctrl+Alt+V)');
     } else {
       mic.classList.remove('recording');
       mic.textContent = '🎤';
+      mic.setAttribute('aria-label', 'Start recording (Ctrl+Alt+V)');
     }
   }
 
@@ -555,10 +557,12 @@ export class BuddySidebarProvider implements vscode.WebviewViewProvider {
         const up = document.createElement('button');
         up.className = 'vote-btn';
         up.title = 'Useful';
+        up.setAttribute('aria-label', 'Mark this reply useful');
         up.textContent = '👍';
         const down = document.createElement('button');
         down.className = 'vote-btn';
         down.title = 'Not useful';
+        down.setAttribute('aria-label', 'Mark this reply not useful');
         down.textContent = '👎';
         const cast = (vote, btn) => {
           vscode.postMessage({ type: 'vote', trigger: m.trigger, reply_text: m.reply.text, vote });
