@@ -22,14 +22,70 @@ import logging
 import struct
 import time
 from typing import Optional
+from urllib.parse import urlsplit
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 logging.basicConfig(level=logging.INFO, format="[voice] %(message)s")
 log = logging.getLogger("voice")
 
 app = FastAPI()
+
+# --- Local-only access guard (#97) --------------------------------------
+#
+# The sidecar plays audio on the host's speakers and exposes WebSocket
+# endpoints. The daemon binds uvicorn to loopback, so remote network
+# attackers can't reach it — but any *local* origin (a browser tab, an
+# Electron app) could otherwise POST /tts or open ws://127.0.0.1/tts/stream
+# and make the user's speakers say anything, or probe whether the optional
+# VAD path is installed.
+#
+# The daemon's own callers (Node's http client and the `ws` library) don't
+# send an Origin header, so we allow a missing Origin and any loopback
+# Origin and reject everything else. TrustedHostMiddleware adds a Host
+# allow-list as defense-in-depth against DNS-rebinding.
+
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+
+
+def _origin_allowed(origin: Optional[str]) -> bool:
+    """True when a request's Origin header is safe to serve.
+
+    A missing Origin (``None``) is allowed — non-browser clients such as
+    the daemon don't send one. A present Origin is allowed only when its
+    host is loopback; any other site (the cross-origin attack vector) is
+    rejected.
+    """
+    if origin is None:
+        return True
+    try:
+        host = urlsplit(origin).hostname
+    except ValueError:
+        return False
+    return host in _LOOPBACK_HOSTS
+
+
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"])
+
+
+@app.middleware("http")
+async def _reject_cross_origin(request: Request, call_next):
+    origin = request.headers.get("origin")
+    if not _origin_allowed(origin):
+        log.warning(
+            "rejecting cross-origin HTTP %s %s (origin=%s)",
+            request.method,
+            request.url.path,
+            origin,
+        )
+        return JSONResponse(
+            {"error": "cross-origin requests are not allowed"}, status_code=403
+        )
+    return await call_next(request)
+
 
 _tts_lock = asyncio.Lock()
 _kokoro = None
@@ -243,6 +299,12 @@ def _slice_int16(samples_array, sample_rate: int, chunk_ms: int):
 
 @app.websocket("/tts/stream")
 async def tts_stream(ws: WebSocket):
+    if not _origin_allowed(ws.headers.get("origin")):
+        log.warning(
+            "rejecting WS /tts/stream connect (origin=%s)", ws.headers.get("origin")
+        )
+        await ws.close(code=1008)
+        return
     await ws.accept()
 
     # Lazy-load Kokoro through the same path /tts uses so we share the
@@ -370,6 +432,10 @@ async def tts_stream(ws: WebSocket):
 
 @app.websocket("/vad")
 async def vad(ws: WebSocket):
+    if not _origin_allowed(ws.headers.get("origin")):
+        log.warning("rejecting WS /vad connect (origin=%s)", ws.headers.get("origin"))
+        await ws.close(code=1008)
+        return
     await ws.accept()
 
     async with _vad_lock:
