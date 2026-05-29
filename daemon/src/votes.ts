@@ -7,9 +7,10 @@
  * thrown so a vote click never breaks the live UI.
  */
 
-import { mkdirSync, appendFileSync, existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
+import { ensureSecureDir, appendFileSecure } from "./secure-store.js";
 
 export type VoteValue = "up" | "down";
 
@@ -24,7 +25,7 @@ export const DEFAULT_VOTES_PATH = join(homedir(), ".coding-buddy", "votes.jsonl"
 
 export class VoteStore {
   constructor(private filePath: string = DEFAULT_VOTES_PATH) {
-    mkdirSync(dirname(this.filePath), { recursive: true });
+    ensureSecureDir(dirname(this.filePath));
   }
 
   record(entry: { trigger: string; reply_text: string; vote: VoteValue }): VoteEntry {
@@ -35,7 +36,7 @@ export class VoteStore {
       vote: entry.vote === "down" ? "down" : "up",
     };
     try {
-      appendFileSync(this.filePath, JSON.stringify(row) + "\n", "utf8");
+      appendFileSecure(this.filePath, JSON.stringify(row) + "\n");
     } catch (err) {
       console.error("[votes] write failed:", err);
     }

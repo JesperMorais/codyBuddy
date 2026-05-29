@@ -1,6 +1,7 @@
-import { mkdirSync, existsSync, readFileSync, appendFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { ensureSecureDir, writeFileSecure, appendFileSecure } from "./secure-store.js";
 
 export interface MemoryEvent {
   ts: number;
@@ -37,14 +38,14 @@ export class MemoryStore {
     this.mutePath = join(dir, "mute.json");
     this.misconceptionsPath = join(dir, "misconceptions.json");
     this.personalityPath = join(dir, "personality.json");
-    mkdirSync(this.dir, { recursive: true });
+    ensureSecureDir(this.dir);
     if (existsSync(this.summaryPath)) {
       this.cachedSummary = readFileSync(this.summaryPath, "utf8");
     }
   }
 
   append(event: MemoryEvent): void {
-    appendFileSync(this.logPath, JSON.stringify(event) + "\n", "utf8");
+    appendFileSecure(this.logPath, JSON.stringify(event) + "\n");
     this.eventsSinceSummary += 1;
   }
 
@@ -62,7 +63,7 @@ export class MemoryStore {
 
   setSummary(text: string): void {
     this.cachedSummary = text.trim();
-    writeFileSync(this.summaryPath, this.cachedSummary, "utf8");
+    writeFileSecure(this.summaryPath, this.cachedSummary);
   }
 
   loadRecent(limit = 50): MemoryEvent[] {
@@ -107,7 +108,7 @@ export class MemoryStore {
   setMutedUntil(ts: number): void {
     const value = Number.isFinite(ts) && ts > 0 ? Math.floor(ts) : 0;
     try {
-      writeFileSync(this.mutePath, JSON.stringify({ mutedUntil: value }), "utf8");
+      writeFileSecure(this.mutePath, JSON.stringify({ mutedUntil: value }));
     } catch {
       // best effort
     }
@@ -132,7 +133,7 @@ export class MemoryStore {
       : { count: 1, last_seen: Date.now(), sample };
     map[pattern] = next;
     try {
-      writeFileSync(this.misconceptionsPath, JSON.stringify(map, null, 2), "utf8");
+      writeFileSecure(this.misconceptionsPath, JSON.stringify(map, null, 2));
     } catch (err) {
       console.error("[memory] misconception write failed", err);
     }
@@ -172,7 +173,7 @@ export class MemoryStore {
    *  swallowed so the in-memory choice is unaffected. */
   setPersonality(name: string): void {
     try {
-      writeFileSync(this.personalityPath, JSON.stringify({ personality: name }), "utf8");
+      writeFileSecure(this.personalityPath, JSON.stringify({ personality: name }));
     } catch {
       // best effort
     }
@@ -199,7 +200,7 @@ export class MemoryStore {
    *  swallowed so the in-memory toggle is unaffected. */
   setShuffle(value: boolean): void {
     try {
-      writeFileSync(join(this.dir, "shuffle.json"), JSON.stringify({ shuffle: value }), "utf8");
+      writeFileSecure(join(this.dir, "shuffle.json"), JSON.stringify({ shuffle: value }));
     } catch {
       // best effort
     }

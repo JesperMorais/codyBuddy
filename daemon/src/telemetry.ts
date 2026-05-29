@@ -1,6 +1,7 @@
-import { mkdirSync, appendFileSync, existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
+import { ensureSecureDir, appendFileSecure } from "./secure-store.js";
 
 /** Subset of Anthropic SDK usage we care about. Every field defaults to 0 so
  *  callers can pass partial objects without guarding each call site. */
@@ -39,7 +40,7 @@ export const DEFAULT_TELEMETRY_PATH = join(homedir(), ".coding-buddy", "telemetr
  */
 export class Telemetry {
   constructor(private filePath: string = DEFAULT_TELEMETRY_PATH) {
-    mkdirSync(dirname(this.filePath), { recursive: true });
+    ensureSecureDir(dirname(this.filePath));
   }
 
   record(method: string, model: string, usage: UsageLike): void {
@@ -53,7 +54,7 @@ export class Telemetry {
       cache_creation_input_tokens: usage.cache_creation_input_tokens ?? 0,
     };
     try {
-      appendFileSync(this.filePath, JSON.stringify(entry) + "\n", "utf8");
+      appendFileSecure(this.filePath, JSON.stringify(entry) + "\n");
     } catch (err) {
       console.error("[telemetry] write failed:", err);
     }
