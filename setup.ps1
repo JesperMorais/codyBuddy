@@ -19,12 +19,14 @@
 #   -SkipVoice    : skip voice/.venv + Python deps (chat-only path)
 #   -SkipPnpm     : skip `pnpm install` (you've already run it)
 #   -Quiet        : suppress info-level output (errors still printed)
+#   -NoDoctor     : skip the final `pnpm doctor` verification handoff
 
 [CmdletBinding()]
 param(
     [switch]$SkipVoice,
     [switch]$SkipPnpm,
-    [switch]$Quiet
+    [switch]$Quiet,
+    [switch]$NoDoctor
 )
 
 $ErrorActionPreference = "Stop"
@@ -138,7 +140,9 @@ if ($missing.Count -gt 0) {
 
 if (-not $SkipPnpm) {
     Write-Info "Running pnpm install..."
-    & pnpm install
+    # --frozen-lockfile matches CI; a bare install would silently rewrite
+    # a drifted lockfile locally while CI rejects it.
+    & pnpm install --frozen-lockfile
     if ($LASTEXITCODE -ne 0) {
         Write-Err "pnpm install failed (exit $LASTEXITCODE)"
         exit $LASTEXITCODE
@@ -216,6 +220,26 @@ if (-not (Test-Path $envFile)) {
     }
 } else {
     Write-Info ".env already exists [ok]"
+}
+
+# Fail-fast hint: warn if .env still carries the placeholder key.
+if ((Test-Path $envFile) -and
+    (Select-String -Path $envFile -Pattern '^ANTHROPIC_API_KEY=sk-ant-\.\.\.$' -Quiet)) {
+    Write-Warn "ANTHROPIC_API_KEY in .env is still the placeholder -- fill it in before running pnpm dev."
+}
+
+# ---- Verification handoff --------------------------------------
+#
+# Run `pnpm doctor` for a green/red checklist instead of a bare "Setup
+# complete". On a fresh install doctor flags the not-yet-filled key and
+# unbuilt daemon -- that's the point. Advisory: a non-zero doctor exit
+# never fails setup. Skip with -NoDoctor (CI passes this for parity).
+if (-not $NoDoctor -and (Test-Command node)) {
+    Write-Info "Running pnpm doctor for verification..."
+    & pnpm doctor
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warn "doctor reported issues -- see above; fix the red lines before pnpm dev."
+    }
 }
 
 # ---- Final message --------------------------------------------

@@ -171,3 +171,32 @@ test("#88 setup.sh soft-checks the ALSA/PortAudio runtime on Linux", () => {
     "ALSA probe must stay advisory (no missing+= in the probe block)"
   );
 });
+
+test("#91 setup polish: frozen lockfile, doctor handoff, hardened node regex, placeholder warn", () => {
+  const sh = readFileSync(shPath, "utf8");
+  const ps = readFileSync(psPath, "utf8");
+
+  // 1. pnpm install matches CI's --frozen-lockfile (no silent lockfile drift).
+  assert.match(sh, /pnpm install --frozen-lockfile/, "setup.sh: needs --frozen-lockfile");
+  assert.match(ps, /pnpm install --frozen-lockfile/, "setup.ps1: needs --frozen-lockfile");
+
+  // 2. `pnpm doctor` verification handoff, opt-out flag, and the
+  //    handoff must stay advisory (|| warn on bash; $LASTEXITCODE-checked
+  //    on PowerShell) so a red doctor never aborts setup.
+  assert.match(sh, /pnpm doctor \|\| warn/, "setup.sh: doctor handoff must be advisory");
+  assert.match(sh, /--no-doctor/, "setup.sh: missing --no-doctor opt-out");
+  assert.match(ps, /pnpm doctor/, "setup.ps1: missing doctor handoff");
+  assert.match(ps, /\$NoDoctor/, "setup.ps1: missing -NoDoctor opt-out");
+
+  // 3. node_major extraction uses the -n/p form so a non-dotted/exotic
+  //    version (v22, v22-nightly) yields empty (caught by -z) instead of
+  //    the raw string, which would crash the numeric `-lt 20` test.
+  assert.ok(
+    sh.includes("sed -nE 's/^v([0-9]+).*/\\1/p'"),
+    "setup.sh: node_major regex not hardened to the -n/p form"
+  );
+
+  // 4. Placeholder ANTHROPIC_API_KEY gets a setup-time warn (doctor reds it too).
+  assert.match(sh, /ANTHROPIC_API_KEY in \.env is still the placeholder/, "setup.sh: missing placeholder warn");
+  assert.match(ps, /ANTHROPIC_API_KEY in \.env is still the placeholder/, "setup.ps1: missing placeholder warn");
+});
